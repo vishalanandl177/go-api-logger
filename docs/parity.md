@@ -2,21 +2,25 @@
 
 This matrix maps the implemented DRF-API-Logger capabilities inspected for this project to their Go equivalents. The packages use Go-native lifecycle, context, and storage interfaces. Fiber/fasthttp adapters are explicitly follow-up work.
 
-| Capability | Implementation | Acceptance evidence |
-| --- | --- | --- |
-| Request/response metadata and bounded bodies | `httpmw`, `Body`, `Event` | Middleware pass-through, body states, HTTP2/SSE/upgrade/gzip tests |
-| Recursive secret masking and query/header masking | Root sanitizer | Regression tables and `FuzzSanitizeJSON` |
-| Endpoint selection and restrictive policies | Root policy evaluator | Capture-time routes, failure fallback, export-gate tests |
-| Background batching and custom subscribers | Root logger, JSON/Slog/SinkFunc | Capacity/byte limits, output isolation, failure and shutdown tests |
-| SQL storage and programmatic access | `storage` | Shared SQLite/Postgres/MySQL live contract suite |
-| Search/filter/sort/detail dashboard | `dashboard` | HTTP tests and desktop/mobile browser smoke |
-| Three lazy analytics charts | Store aggregates and embedded dashboard | Filter-aware chart, date, status, SQL-profile tests |
-| CSV and authorized deletion | `dashboard` | Permission, policy, CSRF, escaping and formula tests |
-| SQL profiling and diagnostic hints | Root collector and integrations/sql/pgx/gorm | Concurrency/overlap, statements/transactions/rows, deduplication tests |
-| Correlation and application context | Root context and integration helpers | HTTP correlation and tracer-context tests |
-| Optional metrics and observability | `integrations` | Registry, label, lifecycle, existing SDK tests |
-| All 16 security hints | Root detector | Per-rule fixture, bounded TTL and inspection opt-in tests |
-| Retention, migrations, doctor | `storage`, `cmd`, `Logger.Diagnose` | Explicit migration, dry-run, cutoff, CLI severity tests |
+| Capability | Implementation | Documentation | Acceptance tests |
+| --- | --- | --- | --- |
+| Request/response metadata and bounded bodies | `httpmw`, `Body`, `Event` | [Capture and body states](configuration.md) | [Pass-through, body states, HTTP/2, SSE, upgrade and gzip](../httpmw/middleware_test.go); [I/O errors, cancellation and optional interfaces](../httpmw/conformance_test.go); [HEAD and response-controller regressions](../httpmw/review_regression_test.go) |
+| Native framework route metadata | Gin v1, chi v5, Echo v4/v5 enrichers around one HTTP capture layer | [Framework setup and boundaries](integrations.md) | [Framework final responses, routes and recovery](../integrations/frameworks_test.go); [chi route policies before body access](../integrations/chi/chi_test.go); [late route resolution and pooled-state lifetime](../route_resolver_test.go) |
+| Recursive secret masking and query/header masking | Root sanitizer | [Masking and custom sanitizers](configuration.md); [privacy boundaries](security.md) | [Redaction, invalid/partial JSON and `FuzzSanitizeJSON`](../logger_test.go); [transform and custom-format regressions](../review_regression_test.go) |
+| Endpoint selection and restrictive policies | Root policy evaluator | [Selection, policies and export gates](configuration.md) | [Policy failure and destination gates](../logger_test.go); [capture-time route restrictions](../httpmw/review_regression_test.go); [policy context isolation](../review_regression_test.go) |
+| Background batching and custom subscribers | Root logger, JSON/Slog/SinkFunc | [Custom outputs and shutdown](configuration.md); [delivery guarantees](operations.md) | [Capacity/byte limits, output isolation, ownership, failures and concurrent shutdown](../logger_test.go); [independent output flushing](../review_regression_test.go) |
+| SQL storage and programmatic access | `storage` | [SQL stores and ownership](storage.md) | [Shared SQLite/PostgreSQL/MySQL contract, transactions, filters and schema checks](../storage/store_test.go); [SQLite read-only opening](../storage/open_test.go) |
+| Search/filter/sort/detail dashboard | `dashboard` | [Request inspector and mounting](dashboard.md) | [List/detail, pagination, escaping, authorization and automatic self-exclusion](../dashboard/dashboard_test.go); [HTTP/SQLite application workflow](../examples/standard/main_test.go) |
+| Three lazy analytics charts | Store aggregates and embedded dashboard | [Traffic patterns and chart semantics](dashboard.md) | [Lazy loading, shared filters, date bounds and missing SQL coverage](../dashboard/dashboard_test.go); [daily/status/SQL aggregates](../storage/store_test.go) |
+| CSV and authorized deletion | `dashboard` | [Export, deletion and permissions](dashboard.md) | [Action authorization, CSRF, persisted export gates, formula handling and selection bounds](../dashboard/dashboard_test.go) |
+| SQL profiling and diagnostic hints | Root collector and integrations/sql/pgx/gorm | [Instrumentation and timing semantics](profiling.md) | [Overlap and incomplete profiles](../logger_test.go); [SQL statements, transactions and rows](../integrations/sql/sql_test.go); [driver fallback compatibility](../integrations/sql/compatibility_test.go); [GORM deduplication](../integrations/gorm/gorm_test.go); [pgx composition, batches, COPY and live PostgreSQL](../integrations/pgx/pgx_test.go) |
+| Correlation and application context | Root context and integration helpers | [Correlation configuration](configuration.md); [SDK context integration](integrations.md) | [Trusted proxies and request IDs](../httpmw/middleware_test.go); [traceparent validation](../httpmw/conformance_test.go); [context isolation](../review_regression_test.go); [active trace ID propagation](../integrations/otel/otel_test.go) |
+| Optional metrics and observability | Five independently selectable Prometheus groups, protected scrape handler, existing-span OTel and request-local Sentry | [Metrics groups, authorization and SDK ordering](integrations.md) | [Bounded labels and registry behavior](../integrations/prometheus/prometheus_test.go); [independent groups](../integrations/prometheus/groups_test.go); [lifecycle metrics](../integrations/prometheus/lifecycle_test.go); [protected handler and self-exclusion](../integrations/prometheus/handler_test.go); [OTel attributes](../integrations/otel/otel_test.go); [Sentry scope isolation](../integrations/sentry/sentry_test.go) |
+| All 16 security hints | Root detector | [Detect-only rules and inspection opt-in](security.md) | [Per-rule fixtures, bounded expiring state and inspection opt-in](../security_test.go) |
+| Retention, migrations, doctor | `storage`, `cmd`, `Logger.Diagnose` | [Operations and retention](operations.md); [explicit schema setup](storage.md) | [Migration, cutoff and dry-run contracts](../storage/store_test.go); [CLI severity, non-writing diagnostics and secret-safe failures](../cmd/apilog/main_test.go); [read-only SQLite enforcement](../storage/open_test.go) |
+| Reproducible performance and outage measurement | Allocation microbenchmarks and HTTP benchmark harness | [Methodology, recorded results and limits](performance.md) | [Harness scenarios and queue bounds](../examples/benchmark/main_test.go); [`BenchmarkEmit`](../logger_test.go); [`BenchmarkMiddleware`](../httpmw/middleware_test.go) |
+
+These links identify the checked-in acceptance tests and benchmarks; their presence does not substitute for a passing release run. Storage PostgreSQL/MySQL cases and the native pgx live test require their documented database environments. Benchmark figures are workload-specific evidence, not universal latency guarantees.
 
 ## Compatibility boundaries
 
