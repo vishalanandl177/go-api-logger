@@ -3,9 +3,9 @@ module example.com/go-api-logger-releasecheck
 go 1.26.0
 
 require (
-	github.com/vishalanandl177/go-api-logger v1.0.0
-	github.com/vishalanandl177/go-api-logger/integrations v1.0.0
-	github.com/vishalanandl177/go-api-logger/storage v1.0.0
+	github.com/vishalanandl177/go-api-logger v1.0.1
+	github.com/vishalanandl177/go-api-logger/integrations v1.0.1
+	github.com/vishalanandl177/go-api-logger/storage v1.0.1
 	modernc.org/sqlite v1.60.1
 )
 
