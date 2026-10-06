@@ -1,0 +1,141 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    - cron: '21 4 * * 1'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  linux:
+    name: Linux Go ${{ matrix.go }} with live SQL stores
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        go: ['1.26.x', '1.27.x']
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: apilog
+          POSTGRES_PASSWORD: ci-only-password
+          POSTGRES_DB: apilog_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U apilog -d apilog_test"
+          --health-interval 5s --health-timeout 5s --health-retries 30
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: ci-root-only-password
+          MYSQL_USER: apilog
+          MYSQL_PASSWORD: ci-only-password
+          MYSQL_DATABASE: apilog_test
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -uroot -pci-root-only-password --silent"
+          --health-interval 5s --health-timeout 5s --health-retries 40
+    env:
+      GOTOOLCHAIN: local
+      CGO_ENABLED: '1'
+      API_LOGGER_TEST_POSTGRES_DSN: postgres://apilog:ci-only-password@127.0.0.1:5432/apilog_test?sslmode=disable
+      APILOG_TEST_POSTGRES_DSN: postgres://apilog:ci-only-password@127.0.0.1:5432/apilog_test?sslmode=disable
+      API_LOGGER_TEST_MYSQL_DSN: apilog:ci-only-password@tcp(127.0.0.1:3306)/apilog_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.go }}
+          check-latest: true
+          cache-dependency-path: |
+            storage/go.sum
+            integrations/go.sum
+            cmd/go.sum
+            examples/go.sum
+      - name: Use checkout modules together
+        run: go work init . ./storage ./integrations ./cmd ./examples
+      - name: Format validation
+        shell: bash
+        run: |
+          files=$(find . -name '*.go' -not -path './.git/*' -not -path './.tools/*' -not -path './.artifacts/*' -print)
+          test -z "$(gofmt -l $files)"
+      - name: Test, race detector, vet and build
+        run: bash scripts/verify.sh --race
+      - name: Fuzz sanitizer
+        run: go test -run='^$' -fuzz='^FuzzSanitizeJSON$' -fuzztime=15s .
+      - name: Fuzz HTTP middleware targets when present
+        shell: bash
+        run: |
+          targets=$(go test ./httpmw -list '^Fuzz' | sed -n '/^Fuzz/p')
+          for target in $targets; do
+            go test ./httpmw -run='^$' -fuzz="^${target}$" -fuzztime=15s
+          done
+
+  portable:
+    name: ${{ matrix.os }} Go ${{ matrix.go }} and SQLite
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+        go: ['1.26.x', '1.27.x']
+    env:
+      GOTOOLCHAIN: local
+      CGO_ENABLED: '0'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.go }}
+          check-latest: true
+          cache-dependency-path: |
+            storage/go.sum
+            integrations/go.sum
+            cmd/go.sum
+            examples/go.sum
+      - name: Use checkout modules together
+        run: go work init . ./storage ./integrations ./cmd ./examples
+      - name: Verify core, dashboard, middleware, SQLite and CLI
+        shell: pwsh
+        run: ./scripts/verify.ps1 -Portable
+
+  security:
+    name: Go vulnerability analysis
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      GOTOOLCHAIN: local
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.x'
+          check-latest: true
+          cache-dependency-path: |
+            storage/go.sum
+            integrations/go.sum
+            cmd/go.sum
+            examples/go.sum
+      - name: Use checkout modules together
+        run: go work init . ./storage ./integrations ./cmd ./examples
+      - name: Install pinned official vulnerability tool
+        run: go install golang.org/x/vuln/cmd/govulncheck@v1.8.0
+      - name: Analyze reachable vulnerabilities in every module
+        shell: bash
+        run: |
+          for module in . storage integrations cmd examples; do
+            (cd "$module" && govulncheck ./...)
+          done

@@ -1,0 +1,11 @@
+*.exe
+*.test
+*.prof
+*.db
+*.db-shm
+*.db-wal
+coverage.out
+.tools/
+.artifacts/
+go.work
+go.work.sum
