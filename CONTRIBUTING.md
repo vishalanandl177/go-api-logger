@@ -22,4 +22,6 @@ go test -bench=. -benchmem . ./httpmw
 
 CI tests both supported Go release lines, Windows/macOS portable behavior, all three SQL stores, security scanning, and fuzz seeds. A stable release requires passing tests and successful installation into an unrelated clean module.
 
+The [published consumer check](scripts/_releasecheck/README.md) deliberately disables the workspace and resolves released versions without replacements. CI runs it separately and scans each module's independent dependency graph. Normal development tests use the workspace to exercise source changes across modules together.
+
 Please open an issue describing the use case before adding a new integration. Custom server integrations should use `Logger.Begin`, shared context helpers, and `Exchange.Finish`, and pass the HTTP behavior and privacy conformance scenarios.

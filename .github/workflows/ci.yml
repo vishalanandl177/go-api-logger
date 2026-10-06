@@ -128,18 +128,17 @@ jobs:
         with:
           go-version: '1.27.x'
           check-latest: true
-          cache-dependency-path: |
-            storage/go.sum
-            integrations/go.sum
-            cmd/go.sum
-            examples/go.sum
-      - name: Use checkout modules together
-        run: go work init . ./storage ./integrations ./cmd ./examples
+          cache: false
       - name: Install pinned official vulnerability tool
         run: go install golang.org/x/vuln/cmd/govulncheck@v1.8.0
       - name: Analyze reachable vulnerabilities in every module
         shell: bash
         run: |
           for module in . storage integrations cmd examples; do
-            (cd "$module" && govulncheck ./...)
+            (cd "$module" && GOWORK=off govulncheck ./...)
           done
+      - name: Verify published packages in a standalone consumer
+        working-directory: scripts/_releasecheck
+        env:
+          GOWORK: 'off'
+        run: go test -mod=readonly -count=1 -v ./...
