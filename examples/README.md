@@ -1,5 +1,11 @@
 # Runnable examples
 
+For the smallest stdout-only application, use [quickstart/main.go](quickstart/main.go). It needs only the core module and is also included in the [README quick start](../README.md#quick-start). From this directory, run `go run ./quickstart`, then POST JSON to `/hello` as shown in [getting started](../docs/getting-started.md).
+
+For framework applications, see [net/http, Gin, chi and Echo examples](../integrations/examples/README.md). Run one example at a time; the defaults use loopback port 8080.
+
+## SQLite, dashboard, metrics and profiling
+
 The `standard` example runs a REST API, an instrumented application SQLite database, a separate log SQLite database, an authenticated embedded dashboard, and protected Prometheus metrics. It binds only to `127.0.0.1`. Its SQL is parameterized and its responses never expose database errors.
 
 From the repository root, create a development workspace once after cloning:

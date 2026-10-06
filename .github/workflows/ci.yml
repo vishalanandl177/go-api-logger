@@ -67,6 +67,8 @@ jobs:
             examples/go.sum
       - name: Use checkout modules together
         run: go work init . ./storage ./integrations ./cmd ./examples
+      - name: Validate documentation and compile complete examples
+        run: python3 scripts/check-docs.py --compile checkout
       - name: Format validation
         shell: bash
         run: |

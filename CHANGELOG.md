@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.1
+
+- Keep policy failures restrictive and failed sink batches correctly accounted even when `GODEBUG=panicnil=1` restores legacy nil-panic behavior.
+- Keep capture-time policy failures restrictive for the rest of the affected request, while allowing subsequent requests to recover.
+- Verify recovery after output errors, panics, timeouts, queue saturation and temporary database faults, while preserving application responses and panics.
+- Add runnable JSON examples for net/http, Gin, chi and Echo, an annotated log-format guide, a first-request walkthrough, and AI integration references.
+- Compile complete documentation examples and validate local documentation links in CI.
+
 ## 1.0.0
 
 Initial release of Go API Logger, with a standard-library core and optional modules.

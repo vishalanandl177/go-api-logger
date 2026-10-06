@@ -1,0 +1,35 @@
+# Go API Logger
+
+> Framework-independent API logging for Go 1.26 and 1.27. Root package name: apilog. Released core, storage and integrations modules: v1.0.1. One net/http capture wrapper records sanitized events and sends them to independent bounded output queues.
+
+## Start here
+
+- [README and complete quick start](README.md): install the core and run a JSON API with graceful shutdown.
+- [First request walkthrough](docs/getting-started.md): shell and PowerShell requests, expected output, troubleshooting.
+- [AI integration contract](docs/ai-integration.md): exact imports, framework selection, lifecycle, constraints and validation.
+- [HTTP and framework recipes](docs/http-integration.md): net/http, custom http.Handler, Gin v1, chi v5, Echo v4/v5; native Fiber/fasthttp are not shipped.
+- [Annotated log examples](docs/log-format.md): JSON record, masking, capture states, route formats and SQL timing units.
+
+## Add features
+
+- [Configuration and outputs](docs/configuration.md): JSON/slog/custom sinks, policies, exclusions, correlation and limits.
+- [Database storage](docs/storage.md): PostgreSQL, MySQL, SQLite, explicit migrations and resource ownership.
+- [Dashboard](docs/dashboard.md): embedded handler, application authentication and separate view/export/delete permissions.
+- [Profiling](docs/profiling.md): database/sql, pgx and GORM; choose one instrumentation source per database path.
+- [Metrics and tracing](docs/integrations.md): Prometheus, existing OpenTelemetry spans and request-local Sentry context.
+- [Operations](docs/operations.md): health, best-effort delivery, flush/shutdown, retention and CLI commands.
+- [Reliability and recovery](docs/reliability.md): recoverable faults, automatic continuation, failure counters and process-supervisor boundaries.
+- [Security](docs/security.md): privacy boundaries and optional detection-only security rules.
+
+## Source and runnable references
+
+- [Core event and interface types](types.go): Event, Body, Profile, Sink, Store and Health.
+- [Config](config.go): exact public fields and defaults.
+- [HTTP adapter](httpmw/middleware.go): final response observation and body capture.
+- [Runnable examples](examples/README.md): quickstart, SQLite/dashboard/profiling app and framework examples.
+- [Architecture](docs/architecture.md): custom adapter contracts and lifecycle.
+- [Parity and verification](docs/parity.md): implemented capabilities and acceptance tests.
+- [Performance](docs/performance.md): reproducible methodology and limits of benchmark claims.
+- [Contributing](CONTRIBUTING.md): module layout and verification commands.
+
+Configure outputs explicitly; an empty output list does not persist logs. Framework Metadata helpers do not emit events. Capture must surround framework error rendering. Drain HTTP before logger shutdown, then close application-owned sinks. JSON redaction happens before outputs; never add a raw fallback. Log delivery is best effort and can drop records under load. The application owns authentication, migrations, signals and telemetry export.

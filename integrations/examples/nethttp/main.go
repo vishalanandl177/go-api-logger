@@ -4,8 +4,6 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/go-chi/chi/v5"
-	apichi "github.com/vishalanandl177/go-api-logger/integrations/chi"
 	"github.com/vishalanandl177/go-api-logger/integrations/examples/internal/run"
 )
 
@@ -14,13 +12,12 @@ func main() {
 }
 
 func newRouter() http.Handler {
-	r := chi.NewRouter()
-	r.Use(apichi.Metadata("users"))
-	r.Get("/users/{id}", func(w http.ResponseWriter, r *http.Request) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /users/{id}", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{"id": chi.URLParam(r, "id")})
+		_ = json.NewEncoder(w).Encode(map[string]string{"id": r.PathValue("id")})
 	})
-	r.Post("/users", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("POST /users", func(w http.ResponseWriter, r *http.Request) {
 		var body map[string]any
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			http.Error(w, "invalid JSON", http.StatusBadRequest)
@@ -30,5 +27,5 @@ func newRouter() http.Handler {
 		w.WriteHeader(http.StatusCreated)
 		_ = json.NewEncoder(w).Encode(map[string]bool{"created": true})
 	})
-	return r
+	return mux
 }

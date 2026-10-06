@@ -2,6 +2,39 @@
 
 Profiling is opt-in with `config.Profile.Enabled = true`. Keep request context attached to database calls. The HTTP middleware cannot discover arbitrary database activity without an installed SQL integration. The log database is independent of the application's database and must not be instrumented by this logger.
 
+```sh
+go get github.com/vishalanandl177/go-api-logger@v1.0.1
+go get github.com/vishalanandl177/go-api-logger/integrations@v1.0.1
+```
+
+There are two separate setup steps: enable request profiling on the logger, then instrument the application's database pool or ORM. Keep your normal outputs and HTTP adapter in place:
+
+```go
+package app
+
+import apilog "github.com/vishalanandl177/go-api-logger"
+
+func ProfiledLogger(outputs []apilog.Output) (*apilog.Logger, error) {
+    cfg := apilog.DefaultConfig()
+    cfg.Outputs = outputs
+    cfg.Profile.Enabled = true
+    cfg.Profile.SampleRate = 1 // profile every request; use 0.1 for roughly 10%
+    cfg.Profile.MaxQueries = 1000
+    return apilog.New(cfg)
+}
+```
+
+Create this logger once at startup. Sampling decides whether each request receives a profile; it does not sample individual queries within a selected request. A zero sample rate captures no profiles, even when `Enabled` is true.
+
+| Application database path | Install once at startup | Request context |
+| --- | --- | --- |
+| `database/sql` | `apisql.OpenDB(connector)` or `apisql.WrapDriver(driver)` | `ExecContext`, `QueryContext`, `QueryRowContext`, `PrepareContext`, `BeginTx` |
+| Native pgx / pgxpool | `apipgx.Install(config.ConnConfig)` for a pool | Pass `r.Context()` to pgx operations |
+| GORM | `db.Use(apigorm.Plugin{})` | `db.WithContext(r.Context())` |
+| Logger's own log store | No application profiling wrapper | Storage suppresses its own queries |
+
+Choose the row matching the API your application actually calls. Do not add the GORM plugin and a separate `WrapLogger` to the same ORM instance. Built-in GORM and `database/sql` integrations suppress nested observations when their underlying driver is also instrumented, but one intended profiling source per database path keeps timing interpretation clear.
+
 The root collector stores bounded normalized SQL fingerprints, counts and timings. It never persists SQL text, bound arguments, DSNs, returned rows or raw database errors. `MaxQueries` bounds retained fingerprints and time intervals; exceeding that bound marks the profile incomplete. SQL hooks run synchronously, while log storage runs through the existing bounded output queue.
 
 ## database/sql
@@ -34,6 +67,33 @@ func UserIDs(ctx context.Context, pool *sql.DB, teamID int64) ([]int64, error) {
         ids = append(ids, id)
     }
     return ids, rows.Err()
+}
+```
+
+For a concrete connector, the pure-Go SQLite driver can be wired as follows. This creates an application pool, not the log-storage pool; initialize your application's tables using its own migration process. Install `modernc.org/sqlite@v1.60.1` if it is not already a direct dependency.
+
+```go
+package app
+
+import (
+    "context"
+    "database/sql"
+
+    apisql "github.com/vishalanandl177/go-api-logger/integrations/sql"
+    "modernc.org/sqlite"
+)
+
+func OpenApplicationSQLite(ctx context.Context, filename string) (*sql.DB, error) {
+    connector, err := sqlite.NewConnector(filename)
+    if err != nil { return nil, err }
+    db := apisql.OpenDB(connector)
+    db.SetMaxOpenConns(1)
+    db.SetMaxIdleConns(1)
+    if err := db.PingContext(ctx); err != nil {
+        _ = db.Close()
+        return nil, err
+    }
+    return db, nil
 }
 ```
 
@@ -72,6 +132,8 @@ func UsersForTeam(ctx context.Context, db *gorm.DB, teamID int64) ([]User, error
 
 Call `ConfigureGORM` once when opening the database, then pass `r.Context()` to `UsersForTeam` in the handler. GORM operation durations can include ORM work and preloading. Streaming `Row`/`Rows` operations finish their GORM observation before subsequent application scanning, unlike the driver-level rows lifetime. Use one primary profiling level when comparing timings. `WrapLogger(existing)` is available without the plugin, but must be used as an alternative to driver profiling for that pool; only the plugin provides nested-call suppression and dry-run awareness.
 
+Keep your existing `gorm.Open(dialector, config)` and driver selection. Handle the error returned by `db.Use(apigorm.Plugin{})`; installing the plugin after individual queries have already run cannot recover their timings. Close GORM's underlying `*sql.DB` as part of normal application shutdown after request handlers have finished.
+
 ## Native pgx
 
 Call `integrations/pgx.Install(config)` on `*pgx.ConnConfig` before connecting. For a pool, pass `poolConfig.ConnConfig`. Installation composes with existing query, batch, COPY, preparation, connection and pool tracers, and repeated installation is harmless.
@@ -90,11 +152,52 @@ func OpenPostgres(ctx context.Context, dsn string) (*pgxpool.Pool, error) {
     config, err := pgxpool.ParseConfig(dsn)
     if err != nil { return nil, err }
     apipgx.Install(config.ConnConfig)
-    return pgxpool.NewWithConfig(ctx, config)
+    pool, err := pgxpool.NewWithConfig(ctx, config)
+    if err != nil { return nil, err }
+    if err := pool.Ping(ctx); err != nil {
+        pool.Close()
+        return nil, err
+    }
+    return pool, nil
 }
 ```
 
-Open the pool once at startup and handle the returned error. Pool construction is lazy; use `pool.Ping(ctx)` if startup must confirm connectivity. Pass each request's context to pool operations and call `pool.Close()` after HTTP requests drain. Normal queries end when result rows close. Batch counts are reported as result callbacks arrive, and each result's measured lifetime starts at `SendBatch`; pipelined lifetimes overlap. `sql.batch` measures the batch lifetime, and `sql.pool.acquire` measures pool acquisition through native pgx hooks. COPY records one operation, without reading copied values. Aborted or abandoned batches may report fewer observed result callbacks than submitted statements. Close result sets and batch results promptly.
+Open the pool once at startup with a deadline-bound context and handle the returned error. This example calls `Ping` because pgx pool construction alone is lazy. Pass each request's context to pool operations and call `pool.Close()` after HTTP requests drain. Normal queries end when result rows close. Batch counts are reported as result callbacks arrive, and each result's measured lifetime starts at `SendBatch`; pipelined lifetimes overlap. `sql.batch` measures the batch lifetime, and `sql.pool.acquire` measures pool acquisition through native pgx hooks. COPY records one operation, without reading copied values. Aborted or abandoned batches may report fewer observed result callbacks than submitted statements. Close result sets and batch results promptly.
+
+## Context inside an HTTP handler
+
+The capture middleware creates the request-local collector before it invokes your handler. Keep `r.Context()` on database calls; replacing it with `context.Background()` loses attribution. The following handler works with an already instrumented `*sql.DB` and an existing application table:
+
+```go
+package app
+
+import (
+    "database/sql"
+    "encoding/json"
+    "net/http"
+
+    apilog "github.com/vishalanandl177/go-api-logger"
+)
+
+func UserCount(db *sql.DB) http.Handler {
+    return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+        apilog.MarkInstrumented(r.Context()) // db is known to use the SQL wrapper
+        var count int64
+        // A fixed stage name groups your application work; it is not a SQL query.
+        endStage := apilog.StartStage(r.Context(), "load_summary")
+        err := db.QueryRowContext(r.Context(), "SELECT COUNT(*) FROM users").Scan(&count)
+        endStage()
+        if err != nil {
+            http.Error(w, "cannot load summary", http.StatusInternalServerError)
+            return
+        }
+        w.Header().Set("Content-Type", "application/json")
+        _ = json.NewEncoder(w).Encode(map[string]int64{"users": count})
+    })
+}
+```
+
+Mount the handler inside `httpmw.Middleware(logger)`. In Gin, pass `c.Request.Context()`; in Echo, pass `c.Request().Context()`; chi handlers use `r.Context()`. Goroutines that inherit the context but finish after the HTTP handler returns cannot change an already emitted profile. Finish request-scoped database work before returning, or instrument detached work separately in your application's own telemetry.
 
 ## Request summaries
 
@@ -107,6 +210,8 @@ Open the pool once at startup and handle the returned error. Pool construction i
 - Unclosed observed queries, unfinished stages or batches, and collection limits mark summaries incomplete. The request event finishes when the handler returns and does not wait for background work. Late completion cannot mutate an emitted event.
 
 Use `StartStage(ctx, "remote_api")` to time an application-defined operation and call its returned function once. Stage names should be fixed strings rather than user input. Sampling applies at the request level. Keep instrumentation disabled or sampled for hot paths if measured overhead exceeds your application's budget.
+
+If the dashboard says **Not tracked**, verify both profiling configuration and database instrumentation, then verify that calls use the request context. `MarkInstrumented` declares known coverage; it does not wrap a database or discover SQL by itself. An empty profile does not prove the handler avoided database work.
 
 ## Verification
 

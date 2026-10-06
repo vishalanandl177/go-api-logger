@@ -171,7 +171,10 @@ func (l *Logger) Emit(ctx context.Context, e Event) {
 			func() { defer func() { _ = recover() }(); observer.ObserveTiming(e.Route, timing) }()
 		}
 	}()
-	d := l.decision(e, true)
+	d, _ := l.decision(e, true)
+	if requestPolicyFailed(ctx) {
+		d = mergeDecision(d, policyFailureDecision())
+	}
 	if requestSkipped(ctx) {
 		d.Skip = true
 	}
@@ -341,12 +344,19 @@ func (w *outputWorker) run() {
 			ctx, cancel := context.WithTimeout(w.ctx, w.logger.config.Queue.WriteTimeout)
 			start := time.Now()
 			err := func() (err error) {
+				returned := false
 				defer func() {
-					if recover() != nil {
+					// A normal-return sentinel also detects panic(nil) when the
+					// application enables GODEBUG=panicnil=1. Never retain the
+					// panic value, which could contain private sink credentials.
+					_ = recover()
+					if !returned {
 						err = errors.New("apilog: sink panic")
 					}
 				}()
-				return w.output.Sink.WriteBatch(ctx, batch)
+				err = w.output.Sink.WriteBatch(ctx, batch)
+				returned = true
+				return err
 			}()
 			cancel()
 			w.mu.Lock()

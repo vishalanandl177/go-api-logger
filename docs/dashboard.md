@@ -8,10 +8,16 @@ The dashboard and all its CSS, JavaScript, and SVG charts are embedded in the ro
 
 Pass an initialized `apilog.Store` and a required authorization callback. The store schema must already exist. Authentication middleware must run before this handler so the callback can inspect your application's principal in `r.Context()`.
 
+Install `github.com/vishalanandl177/go-api-logger@v1.0.1`; the dashboard is part of that root module. SQL-backed dashboards also need the [storage module and an explicitly migrated store](storage.md). A JSON or `slog` sink alone cannot back the dashboard because it does not implement the querying/deletion methods of `apilog.Store`.
+
+This complete mounting helper adapts an existing application authenticator and permission checker. The application implements both functions; the logger does not supply a user/session system. The permission names below are examples to map to your own roles or access-control service.
+
 ```go
 package app
 
 import (
+    "context"
+    "errors"
     "net/http"
     "time"
 
@@ -19,21 +25,47 @@ import (
     "github.com/vishalanandl177/go-api-logger/dashboard"
 )
 
-// authorize must verify an authenticated application principal and its permission
-// for the supplied action. Never use an unconditional true callback in production.
-func LogDashboard(store apilog.Store, authorize func(*http.Request, dashboard.Action) bool) (http.Handler, error) {
-    return dashboard.New(store, dashboard.Options{
+// authenticate must reject unauthenticated requests or establish a principal in
+// the request context. hasPermission must read that principal and deny by default.
+func MountLogDashboard(
+    mux *http.ServeMux,
+    store apilog.Store,
+    authenticate func(http.Handler) http.Handler,
+    hasPermission func(context.Context, string) bool,
+) error {
+    if mux == nil || authenticate == nil || hasPermission == nil {
+        return errors.New("dashboard requires router, authentication, and permissions")
+    }
+    handler, err := dashboard.New(store, dashboard.Options{
         BasePath:      "/ops/api-logs",
         Timezone:      time.UTC,
         SlowThreshold: 200 * time.Millisecond,
-        Authorize:     authorize,
+        Authorize: func(r *http.Request, action dashboard.Action) bool {
+            switch action {
+            case dashboard.View:
+                return hasPermission(r.Context(), "api_logs:view")
+            case dashboard.Export:
+                return hasPermission(r.Context(), "api_logs:export")
+            case dashboard.Delete:
+                return hasPermission(r.Context(), "api_logs:delete")
+            default:
+                return false
+            }
+        },
     })
+    if err != nil { return err }
+    mux.Handle("/ops/api-logs/", authenticate(handler))
+    return nil
 }
 ```
 
-Mount the returned handler at `/ops/api-logs/` in your existing router, behind the application's authentication middleware. `BasePath` must match the full externally visible path passed to the handler; do not strip that prefix. With `net/http`, use `mux.Handle("/ops/api-logs/", handler)`. Framework routers can mount this same `http.Handler` using their standard handler bridge.
+Call `MountLogDashboard` once during router setup, passing the same initialized store used by the logging output. Then wrap the mux with `httpmw.Middleware(logger)` and pass it to your existing `http.Server`. `BasePath` must match the full externally visible path passed to the handler; do not strip that prefix. Framework routers can mount the same dashboard `http.Handler` using their standard handler bridge; see [framework integration](integrations.md).
+
+If a reader should only inspect logs, grant only `api_logs:view`. Granting `api_logs:export` or `api_logs:delete` without view permission does not grant access because the dashboard checks `View` before dispatching every endpoint. To use a different display timezone, pass a non-nil location returned by `time.LoadLocation` and handle its error at startup. Chart day buckets remain UTC.
 
 The dashboard automatically marks its own requests as excluded from API capture, including custom mount paths, chart endpoints, and assets. It does not persist or export the logs being inspected. Keep the dashboard on an internal or otherwise appropriately restricted application route. Safe request metrics can still observe these requests.
+
+Also add the mount prefix to `cfg.SkipPaths`, for example `/ops/api-logs`, before constructing the logger. This excludes authentication redirects and failures that return before the dashboard handler gets a chance to mark the exchange as skipped.
 
 ### Options and defaults
 
@@ -70,6 +102,8 @@ CSV export includes request and response content, headers, correlation metadata,
 
 Deletion is permanent. Both actions use POST and Go's `http.CrossOriginProtection` to reject cross-origin browser submissions using Fetch Metadata or Origin/Host validation. Modern browsers supply these headers automatically. Non-browser clients without either header are allowed by the standard library protection, but still require your application's authentication and action authorization. Reverse proxies must preserve the public Host header. No trusted-origin or CSRF-bypass option is exposed.
 
+There is no `CSRFToken` option or dashboard token endpoint to wire up. The built-in forms already submit same-origin POST requests. Keep your application's own CSRF/session middleware where it is required by that application's authentication design; built-in cross-origin checks do not replace authentication. On a 403, first distinguish missing view/export/delete permission from a proxy changing the Host or a browser making a cross-origin submission. Do not work around either failure by returning `true` for every authorization action.
+
 The dashboard sends `Cache-Control: no-store`, a restrictive Content Security Policy, and frame restrictions. Application authentication cookies and sessions remain the application's responsibility. Storage errors return a generic message without database errors, SQL statements, or credentials.
 
 ## Handler endpoints
@@ -98,3 +132,5 @@ go test -race ./dashboard
 ```
 
 The tests cover application authorization, cross-origin rejection, persisted export restrictions, CSV formula handling, HTML escaping, timezone filters, shared chart filters, SQL instrumentation coverage, pagination, selection bounds, mount prefixes, and safe storage errors.
+
+The [standard application](../examples/standard/main.go) provides runnable setup with SQLite, application authentication, logging, profiling, and dashboard mounting. Its local-demo authentication is an example; production applications should supply their existing authentication and permission rules through the interfaces above.

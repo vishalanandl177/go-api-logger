@@ -27,7 +27,13 @@ func matches(r Rule, e Event, final bool) bool {
 	}
 	return (r.Route == "" || r.Route == e.Route) && (r.Name == "" || r.Name == e.Name) && (r.Group == "" || r.Group == e.Group) && (r.Handler == "" || r.Handler == e.Handler) && (r.PathPrefix == "" || strings.HasPrefix(e.Path, r.PathPrefix)) && (len(r.Methods) == 0 || contains(r.Methods, e.Method)) && (len(r.Statuses) == 0 || contains(r.Statuses, e.Status)) && (len(r.StatusClasses) == 0 || contains(r.StatusClasses, e.Status/100))
 }
-func (l *Logger) decision(e Event, final bool) (d Decision) {
+func policyFailureDecision() Decision {
+	return Decision{StripHeaders: true, StripRequest: true, StripResponse: true, StripQuery: true, DisableExport: true}
+}
+
+// policyFailed distinguishes a broken callback from an intentional decision so
+// an exchange can retain failure restrictions until its final emission.
+func (l *Logger) decision(e Event, final bool) (d Decision, policyFailed bool) {
 	d.StripRequest = l.config.MetadataOnly
 	d.StripResponse = l.config.MetadataOnly
 	if len(l.config.Methods) > 0 && !contains(l.config.Methods, e.Method) {
@@ -51,23 +57,20 @@ func (l *Logger) decision(e Event, final bool) (d Decision) {
 	}
 	if l.config.Policy != nil {
 		var p Decision
-		failed := false
+		// A nil panic can recover as nil when GODEBUG=panicnil=1. Only a
+		// normal successful return may authorize retaining protected data.
+		failed := true
 		func() {
-			defer func() {
-				if recover() != nil {
-					failed = true
-				}
-			}()
+			defer func() { _ = recover() }()
 			var err error
 			p, err = l.config.Policy(e)
 			failed = err != nil
 		}()
 		if failed {
-			p = Decision{StripHeaders: true, StripRequest: true, StripResponse: true, StripQuery: true, DisableExport: true}
-			d = mergeDecision(d, p)
-		} else {
-			d = mergeDecision(d, p)
+			p = policyFailureDecision()
+			policyFailed = true
 		}
+		d = mergeDecision(d, p)
 	}
-	return d
+	return d, policyFailed
 }

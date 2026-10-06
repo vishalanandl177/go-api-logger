@@ -33,6 +33,7 @@ type Exchange struct {
 	active                        int
 	finished                      bool
 	suppressed                    bool
+	policyFailed                  bool
 	routeResolver                 *routeResolver
 	requestSample, responseSample []byte
 	captureDuration               time.Duration
@@ -70,6 +71,15 @@ func requestSkipped(ctx context.Context) bool {
 		x.mu.Lock()
 		defer x.mu.Unlock()
 		return x.suppressed
+	}
+	return false
+}
+
+func requestPolicyFailed(ctx context.Context) bool {
+	if x := exchange(ctx); x != nil {
+		x.mu.Lock()
+		defer x.mu.Unlock()
+		return x.policyFailed
 	}
 	return false
 }
@@ -227,7 +237,7 @@ func SetTraceID(ctx context.Context, id string) {
 func (x *Exchange) InspectSamples(request, response []byte) {
 	x.mu.Lock()
 	defer x.mu.Unlock()
-	if x.finished || x.suppressed || x.logger.security == nil {
+	if x.finished || x.suppressed || x.policyFailed || x.logger.security == nil {
 		return
 	}
 	c := x.logger.config.Security
@@ -286,13 +296,21 @@ func (x *Exchange) CaptureAllowed(request bool) bool {
 	e.Context = maps.Clone(x.event.Context)
 	e.RequestHeaders = copyHeaders(x.event.RequestHeaders)
 	e.ResponseHeaders = copyHeaders(x.event.ResponseHeaders)
-	skipped := x.suppressed || x.finished || x.routeResolver != nil && x.routeResolver != r
+	skipped := x.suppressed || x.policyFailed || x.finished || x.routeResolver != nil && x.routeResolver != r
 	x.mu.Unlock()
 	if skipped {
 		return false
 	}
-	d := x.logger.decision(e, false)
-	return !d.Skip && !(request && d.StripRequest) && !(!request && d.StripResponse)
+	d, failed := x.logger.decision(e, false)
+	x.mu.Lock()
+	defer x.mu.Unlock()
+	if failed && !x.finished {
+		// Failure is sticky only for this exchange. In particular, a later
+		// successful response/final decision cannot authorize these samples.
+		x.policyFailed = true
+		x.requestSample, x.responseSample = nil, nil
+	}
+	return !x.policyFailed && !x.suppressed && !x.finished && !d.Skip && !(request && d.StripRequest) && !(!request && d.StripResponse)
 }
 func (x *Exchange) Finish(e Event) {
 	x.mu.Lock()
@@ -321,7 +339,7 @@ func (x *Exchange) Finish(e Event) {
 	if e.RequestHeaders == nil {
 		e.RequestHeaders = x.event.RequestHeaders
 	}
-	if x.suppressed {
+	if x.suppressed || x.policyFailed {
 		e.Request.Data, e.Response.Data = nil, nil
 		e.Request.State, e.Response.State = "omitted", "omitted"
 		x.requestSample, x.responseSample = nil, nil
@@ -346,18 +364,19 @@ func (x *Exchange) Finish(e Event) {
 		}
 		e.Profile = x.profile
 	}
+	policyFailed := x.policyFailed
+	requestSample, responseSample := x.requestSample, x.responseSample
+	x.requestSample, x.responseSample = nil, nil
 	x.mu.Unlock()
-	if x.logger.security != nil {
+	if x.logger.security != nil && !policyFailed {
 		securityEvent := e
-		if x.requestSample != nil {
-			securityEvent.Request.Data = x.requestSample
+		if requestSample != nil {
+			securityEvent.Request.Data = requestSample
 		}
-		if x.responseSample != nil {
-			securityEvent.Response.Data = x.responseSample
+		if responseSample != nil {
+			securityEvent.Response.Data = responseSample
 		}
 		e.Security = x.logger.security.inspect(securityEvent)
-		x.requestSample = nil
-		x.responseSample = nil
 	}
 	defer func() {
 		if observer, ok := x.logger.config.Observer.(RequestObserver); ok {

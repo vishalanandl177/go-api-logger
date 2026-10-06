@@ -58,7 +58,9 @@ func TestSQLStores(t *testing.T) {
 				{Version: 1, ID: "c", Time: base.Add(2 * time.Hour), Duration: 900 * time.Millisecond, Method: "GET", URL: "/gamma", Status: 500, Profile: &apilog.Profile{Instrumented: true, QueryCount: 12}},
 				{Version: 1, ID: "d", Time: base.Add(48 * time.Hour), Duration: 50 * time.Millisecond, Method: "GET", URL: "/delta", Status: 404, Profile: &apilog.Profile{Instrumented: false}},
 			}
-			t.Cleanup(func() { _, _ = s.Delete(context.Background(), []string{"a", "b", "c", "d", "new", "parallel"}) })
+			t.Cleanup(func() {
+				_, _ = s.Delete(context.Background(), []string{"a", "b", "c", "d", "new", "parallel", "recovered"})
+			})
 			if err = s.WriteBatch(ctx, events); err != nil {
 				t.Fatal(err)
 			}
@@ -129,6 +131,19 @@ func TestSQLStores(t *testing.T) {
 			cancel()
 			if err = s.WriteBatch(canceled, []apilog.Event{newEvent}); !errors.Is(err, context.Canceled) {
 				t.Fatalf("cancellation: %v", err)
+			}
+			// A rejected transaction and canceled batch must not poison the same
+			// store/pool. This also runs against PostgreSQL/MySQL in integration CI.
+			recovered := events[0]
+			recovered.ID = "recovered"
+			if err = s.WriteBatch(ctx, []apilog.Event{recovered}); err != nil {
+				t.Fatalf("write after failed batches: %v", err)
+			}
+			if _, err = s.Get(ctx, recovered.ID); err != nil {
+				t.Fatalf("recovered event missing: %v", err)
+			}
+			if count, err := s.Delete(ctx, []string{recovered.ID}); err != nil || count != 1 {
+				t.Fatalf("recovery cleanup: %d %v", count, err)
 			}
 			pruned, err := s.Prune(ctx, apilog.PruneOptions{Before: base.Add(2 * time.Hour), DryRun: true, BatchSize: 1})
 			if err != nil || pruned.Matched != 2 || pruned.Deleted != 0 {

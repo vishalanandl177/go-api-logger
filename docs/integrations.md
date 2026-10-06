@@ -4,30 +4,31 @@ The root module has no SDK dependencies. Optional adapters are in the separate `
 
 ## Frameworks
 
+Start with the [HTTP integration guide](http-integration.md). It provides versioned install commands, complete imports, copyable recipes for an existing `http.Handler`, `http.HandlerFunc`, or `http.Server`, and Gin v1, chi v5, Echo v4/v5 integrations. It also explains middleware ordering, route templates, body states, streaming, compression, errors, panics, and shutdown.
+
 | Framework | Package | Integration |
 | --- | --- | --- |
-| Standard library | `httpmw` in root | Wrap any `http.Handler`; ServeMux route patterns are recognized. |
+| Standard library and compatible routers | `httpmw` in root | Wrap one `http.Handler`; ServeMux route patterns are recognized. |
 | chi v5 | `integrations/chi` | `router.Use(apichi.Metadata("group"))` |
 | Gin v1 | `integrations/gin` | `router.Use(apigin.Metadata("group"))` |
 | Echo v4 | `integrations/echov4` | `router.Use(apiecho.Metadata("group"))` |
 | Echo v5 | `integrations/echov5` | Same shape, with Echo v5 context types and named route metadata. |
 
-Pass `httpmw.Middleware(logger)(router)` to `http.Server.Handler`. The outer wrapper sees Echo's final error responses and framework recovery responses. Installing metadata alone does not capture requests. Do not install a second HTTP capture middleware inside the same router. A framework recovery middleware may consume a panic before outer capture sees it; the response status is recorded, but a 500 status is not proof of an exception.
-
-Gin records the handler name separately from route names. Echo v5 reads the registered route name. Use root `SetRoute`, `SetHandler`, and `SetContext` for explicit application metadata. Framework contexts are used only synchronously and are never queued.
+Pass `httpmw.Middleware(logger)(router)` to `http.Server.Handler`. Keep capture outside framework recovery and final error rendering. Install the metadata helper to populate native route fields; metadata alone does not capture requests. Do not install a second capture middleware inside the router. A framework recovery middleware may consume a panic before outer capture sees it: its response is logged, but a 500 status is not proof of an exception.
 
 Runnable examples, from the `integrations` directory:
 
 ```sh
+go run ./examples/nethttp
 go run ./examples/gin
 go run ./examples/chi
 go run ./examples/echov4
 go run ./examples/echov5
 ```
 
-Run one at a time. Each listens on loopback port 8080, serves `/users/42`, writes sanitized JSON lines, and drains HTTP requests before flushing logs on interrupt.
+Run one at a time. Each listens on loopback port 8080, serves `GET /users/42` and `POST /users`, writes sanitized JSON lines, and drains HTTP requests before flushing logs on interrupt. Follow the [sample requests and expected masked output](http-integration.md#read-bodies-normally-and-check-capture-states). These examples set batch size 1 for immediate demonstration; production defaults batch 50 events or wait 10 seconds.
 
-The integration module pins verified Go proxy versions: Gin 1.12.0, chi 5.3.2, Echo 4.16.0 and 5.4.0. Other net/http-compatible routers can use the generic wrapper directly. Fiber/fasthttp require a native adapter or their interoperability bridge; these packages do not claim native Fiber/fasthttp conformance.
+The integration module pins verified versions: Gin 1.12.0, chi 5.3.2, Echo 4.16.0 and 5.4.0. Native Fiber/fasthttp adapters are not included. For other server implementations, see the [custom adapter boundary](http-integration.md#servers-without-nethttp).
 
 ## Prometheus
 

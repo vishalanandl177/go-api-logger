@@ -27,64 +27,136 @@ Native Fiber/fasthttp adapters are follow-up work. They are not included in the 
 Install the core in an existing Go module:
 
 ```sh
-go get github.com/vishalanandl177/go-api-logger@v1.0.0
+go get github.com/vishalanandl177/go-api-logger@v1.0.1
 ```
 
-The following complete application logs sanitized events as JSON lines. Applications own server lifetime and output resources.
+Save this complete application as `main.go` in your module, then run `go run .`. It logs sanitized events as JSON lines and owns its server shutdown. The same code is available in [examples/quickstart/main.go](examples/quickstart/main.go).
 
 ```go
 package main
 
 import (
-    "context"
-    "errors"
-    "log"
-    "net/http"
-    "os"
-    "os/signal"
-    "time"
+	"context"
+	"encoding/json"
+	"errors"
+	"io"
+	"log"
+	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
-    apilog "github.com/vishalanandl177/go-api-logger"
-    "github.com/vishalanandl177/go-api-logger/httpmw"
+	apilog "github.com/vishalanandl177/go-api-logger"
+	"github.com/vishalanandl177/go-api-logger/httpmw"
 )
 
 func main() {
-    cfg := apilog.DefaultConfig()
-    cfg.Outputs = []apilog.Output{{
-        Name: "stdout", Kind: "export",
-        Sink: &apilog.JSONSink{Writer: os.Stdout},
-    }}
-    logger, err := apilog.New(cfg)
-    if err != nil { log.Fatal(err) }
+	if err := run(); err != nil {
+		log.Fatal(err)
+	}
+}
 
-    mux := http.NewServeMux()
-    mux.HandleFunc("POST /hello", func(w http.ResponseWriter, r *http.Request) {
-        w.Header().Set("Content-Type", "application/json")
-        _, _ = w.Write([]byte(`{"message":"hello"}`))
-    })
-    server := &http.Server{
-        Addr: "127.0.0.1:8080", Handler: httpmw.Middleware(logger)(mux),
-        ReadHeaderTimeout: 5 * time.Second,
-    }
-    stop, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
-    defer cancel()
-    serverError := make(chan error, 1)
-    go func() { serverError <- server.ListenAndServe() }()
-    select {
-    case <-stop.Done():
-        ctx, done := context.WithTimeout(context.Background(), 10*time.Second)
-        if err := server.Shutdown(ctx); err != nil { _ = server.Close() }
-        done()
-    case err := <-serverError:
-        if !errors.Is(err, http.ErrServerClosed) { log.Print(err) }
-    }
-    ctx, done := context.WithTimeout(context.Background(), 10*time.Second)
-    defer done()
-    if err := logger.Shutdown(ctx); err != nil { log.Print(err) }
+func run() error {
+	cfg := apilog.DefaultConfig()
+	cfg.Queue.FlushInterval = time.Second // Show the first log promptly in this demo.
+	cfg.Correlation.Enabled = true
+	cfg.Outputs = []apilog.Output{{
+		Name: "stdout", Kind: "export",
+		Sink: &apilog.JSONSink{Writer: os.Stdout},
+	}}
+	logger, err := apilog.New(cfg)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := logger.Shutdown(ctx); err != nil {
+			log.Printf("logger shutdown: %v", err)
+		}
+	}()
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /hello", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("X-Request-ID", apilog.RequestID(r.Context()))
+		var input struct {
+			Name  string `json:"name"`
+			Token string `json:"token"`
+		}
+		decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 32<<10))
+		if decoder.Decode(&input) != nil || decoder.Decode(&struct{}{}) != io.EOF {
+			w.WriteHeader(http.StatusBadRequest)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "provide one JSON object"})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]string{"message": "Hello, " + input.Name})
+	})
+	server := &http.Server{
+		Addr: "127.0.0.1:8080", Handler: httpmw.Middleware(logger)(mux),
+		ReadHeaderTimeout: 5 * time.Second,
+	}
+	stop, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+	serverError := make(chan error, 1)
+	go func() { serverError <- server.ListenAndServe() }()
+	log.Print("POST JSON to http://127.0.0.1:8080/hello; Ctrl+C to stop")
+	select {
+	case <-stop.Done():
+	case err = <-serverError:
+		if errors.Is(err, http.ErrServerClosed) {
+			err = nil
+		}
+	}
+	// Drain active handlers even when an accept/listener error stopped serving.
+	ctx, done := context.WithTimeout(context.Background(), 10*time.Second)
+	shutdownErr := server.Shutdown(ctx)
+	done()
+	if shutdownErr != nil {
+		_ = server.Close()
+	}
+	return errors.Join(err, shutdownErr)
 }
 ```
 
-The logger observes request bodies only as your handler reads them. The example above does not read a request body, so its capture state is `unread`. It never drains a body simply to log it.
+From another terminal, send a fictional credential:
+
+```sh
+curl -H 'Content-Type: application/json' -d '{"name":"Ada","token":"example-secret"}' http://127.0.0.1:8080/hello
+```
+
+In PowerShell, use:
+
+```powershell
+Invoke-RestMethod 'http://127.0.0.1:8080/hello' -Method Post -ContentType 'application/json' -Body '{"name":"Ada","token":"example-secret"}'
+```
+
+The API returns `{"message":"Hello, Ada"}`. Within roughly one second, stdout receives an event with `request.data.token` set to `***FILTERED***`, status 200, and route `POST /hello`. The example enables correlation and shortens the flush interval for visibility. It reads the request body as part of the handler; a handler that does not read its body produces an `unread` capture state.
+
+For the full setup workflow, see [getting started](docs/getting-started.md). For example JSON records, units and body states, see [what logs look like](docs/log-format.md).
+
+## Use your existing HTTP server
+
+The common boundary is `http.Handler`. Keep your router and server; wrap their handler once:
+
+```go
+server.Handler = httpmw.Middleware(logger)(existingRouter)
+```
+
+This fragment assumes `logger` was created at startup and `existingRouter` implements `http.Handler`. Capture belongs outside framework recovery and final error rendering. Add the matching metadata helper inside Gin, chi, or Echo:
+
+| Application | HTTP wrapper | Route metadata |
+| --- | --- | --- |
+| `net/http`, `http.ServeMux`, custom `http.Handler` | `httpmw.Middleware(logger)(handler)` | ServeMux patterns are automatic; custom routers can use `apilog.SetRoute`. |
+| Gin v1 | Wrap the Gin engine | `apigin.Metadata("api")` from `integrations/gin` |
+| chi v5 | Wrap the chi router | `apichi.Metadata("api")` from `integrations/chi` |
+| Echo v4 | Wrap the Echo engine | `apiecho.Metadata("api")` from `integrations/echov4` |
+| Echo v5 | Wrap the Echo engine | `apiecho.Metadata("api")` from `integrations/echov5` |
+
+The [HTTP integration guide](docs/http-integration.md) includes exact imports, complete helper files, framework-specific middleware order, and runnable examples. Any compatible `http.Handler` can use the wrapper; native Fiber/fasthttp and non-HTTP protocols need their own adapters and are not covered by this release.
+
+For AI coding tools, start with [llms.txt](llms.txt) and the [integration contract](docs/ai-integration.md). They identify package names, supported boundaries, lifecycle rules and verification steps.
 
 ## Choose only the packages you need
 
@@ -101,9 +173,9 @@ Integration dependencies are isolated from the standard-library core. The initia
 Install optional modules and the operations command independently:
 
 ```sh
-go get github.com/vishalanandl177/go-api-logger/storage@v1.0.0
-go get github.com/vishalanandl177/go-api-logger/integrations@v1.0.0
-go install github.com/vishalanandl177/go-api-logger/cmd/apilog@v1.0.0
+go get github.com/vishalanandl177/go-api-logger/storage@v1.0.1
+go get github.com/vishalanandl177/go-api-logger/integrations@v1.0.1
+go install github.com/vishalanandl177/go-api-logger/cmd/apilog@v1.0.1
 ```
 
 Add the Go binary directory (`go env GOBIN`, or `$(go env GOPATH)/bin` when GOBIN is empty) to your PATH to invoke `apilog`. The CLI reads database credentials from an environment variable. See the [operations guide](docs/operations.md).
@@ -132,6 +204,10 @@ Metadata, profiling collections, and security state are bounded too. Invalid or 
 
 ## Guides
 
+- [First request walkthrough](docs/getting-started.md)
+- [HTTP, Gin, chi and Echo recipes](docs/http-integration.md)
+- [Log format and annotated examples](docs/log-format.md)
+- [AI integration contract](docs/ai-integration.md)
 - [Configuration, policies, and custom outputs](docs/configuration.md)
 - [Database storage and migrations](docs/storage.md)
 - [Embedded dashboard and authorization](docs/dashboard.md)
@@ -144,6 +220,8 @@ Metadata, profiling collections, and security state are bounded too. Invalid or 
 - [Contributing and local verification](CONTRIBUTING.md)
 
 ## Delivery guarantees
+
+Recoverable sink errors and logging-hook panics are isolated. Workers continue processing later batches, so logging resumes when a failed output recovers. See [failure isolation and recovery](docs/reliability.md) for tested behavior, custom-sink obligations, and process-level restart boundaries.
 
 This library provides best-effort operational logging. A full queue, output failure, shutdown deadline, or process crash can lose events. Watch `logger.Health()` and `logger.Diagnose()` or the Prometheus integration. `Flush` waits for accepted events to be settled; inspect health counters to distinguish successful delivery from failure.
 

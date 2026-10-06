@@ -1,12 +1,18 @@
 package main
 
 import (
+	"net/http"
+
 	"github.com/gin-gonic/gin"
 	"github.com/vishalanandl177/go-api-logger/integrations/examples/internal/run"
 	apigin "github.com/vishalanandl177/go-api-logger/integrations/gin"
 )
 
 func main() {
+	run.Serve(newRouter())
+}
+
+func newRouter() http.Handler {
 	r := gin.New()
 	r.Use(apigin.Metadata("users"), gin.Recovery())
 	r.GET("/users/:id", func(c *gin.Context) { c.JSON(200, gin.H{"id": c.Param("id")}) })
@@ -18,5 +24,5 @@ func main() {
 		}
 		c.JSON(201, gin.H{"created": true})
 	})
-	run.Serve(r)
+	return r
 }

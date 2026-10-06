@@ -4,20 +4,24 @@ package run
 import (
 	"context"
 	"errors"
-	apilog "github.com/vishalanandl177/go-api-logger"
-	"github.com/vishalanandl177/go-api-logger/httpmw"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
+
+	apilog "github.com/vishalanandl177/go-api-logger"
+	"github.com/vishalanandl177/go-api-logger/httpmw"
 )
 
 // Serve writes sanitized JSON logs and listens on loopback. Interrupt the process
 // to stop HTTP admission, drain active requests, then flush the logger.
 func Serve(router http.Handler) {
 	config := apilog.DefaultConfig()
+	// Make the first demo event visible promptly. Production defaults batch 50
+	// events or wait 10 seconds; keep batching enabled for higher throughput.
+	config.Queue.BatchSize = 1
 	config.Correlation.Enabled = true
 	config.Outputs = []apilog.Output{{Name: "stdout", Kind: "export", Sink: &apilog.JSONSink{Writer: os.Stdout}}}
 	logger, err := apilog.New(config)
@@ -29,7 +33,7 @@ func Serve(router http.Handler) {
 	defer stop()
 	done := make(chan error, 1)
 	go func() { done <- server.ListenAndServe() }()
-	log.Print("Example listening on http://127.0.0.1:8080/users/42")
+	log.Print("Example listening on http://127.0.0.1:8080/users/42; POST JSON to /users to see masked body capture")
 	select {
 	case <-ctx.Done():
 	case err = <-done:
