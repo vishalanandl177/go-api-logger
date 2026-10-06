@@ -62,14 +62,15 @@ func main() {
     }
     stop, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
     defer cancel()
-    go func() {
-        <-stop.Done()
+    serverError := make(chan error, 1)
+    go func() { serverError <- server.ListenAndServe() }()
+    select {
+    case <-stop.Done():
         ctx, done := context.WithTimeout(context.Background(), 10*time.Second)
-        defer done()
-        _ = server.Shutdown(ctx)
-    }()
-    if err := server.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
-        log.Print(err)
+        if err := server.Shutdown(ctx); err != nil { _ = server.Close() }
+        done()
+    case err := <-serverError:
+        if !errors.Is(err, http.ErrServerClosed) { log.Print(err) }
     }
     ctx, done := context.WithTimeout(context.Background(), 10*time.Second)
     defer done()

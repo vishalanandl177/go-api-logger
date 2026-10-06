@@ -363,20 +363,37 @@ func requestID(r *http.Request, c apilog.Config) string {
 	_, _ = rand.Read(id[:])
 	return hex.EncodeToString(id[:])
 }
+func lowerHex(s string) bool {
+	for _, c := range s {
+		if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f') {
+			return false
+		}
+	}
+	return true
+}
 func traceID(r *http.Request, c apilog.Config) string {
 	for _, h := range c.Correlation.TraceIDHeaders {
-		v := r.Header.Get(h)
-		if strings.EqualFold(h, "traceparent") {
-			p := strings.Split(v, "-")
-			if len(p) != 4 || len(p[0]) != 2 || p[0] == "ff" || len(p[1]) != 32 || len(p[2]) != 16 || len(p[3]) != 2 || p[1] == strings.Repeat("0", 32) || p[2] == strings.Repeat("0", 16) {
-				continue
+		value := r.Header.Get(h)
+		if !strings.EqualFold(h, "traceparent") {
+			if validID(value) {
+				return value
 			}
-			if _, err := hex.DecodeString(strings.Join(p, "")); err == nil {
-				return p[1]
-			}
-		} else if validID(v) {
-			return v
+			continue
 		}
+		if len(value) < 55 || value[2] != '-' || value[35] != '-' || value[52] != '-' {
+			continue
+		}
+		version, id, parent, flags := value[:2], value[3:35], value[36:52], value[53:55]
+		if version == "ff" || !lowerHex(version) || !lowerHex(id) || !lowerHex(parent) || !lowerHex(flags) || id == strings.Repeat("0", 32) || parent == strings.Repeat("0", 16) {
+			continue
+		}
+		if version == "00" && len(value) != 55 {
+			continue
+		}
+		if version != "00" && len(value) > 55 && value[55] != '-' {
+			continue
+		}
+		return id
 	}
 	return ""
 }

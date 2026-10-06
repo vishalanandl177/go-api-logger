@@ -54,8 +54,8 @@ jobs:
       APILOG_TEST_POSTGRES_DSN: postgres://apilog:ci-only-password@127.0.0.1:5432/apilog_test?sslmode=disable
       API_LOGGER_TEST_MYSQL_DSN: apilog:ci-only-password@tcp(127.0.0.1:3306)/apilog_test
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version: ${{ matrix.go }}
           check-latest: true
@@ -69,8 +69,11 @@ jobs:
       - name: Format validation
         shell: bash
         run: |
-          files=$(find . -name '*.go' -not -path './.git/*' -not -path './.tools/*' -not -path './.artifacts/*' -print)
-          test -z "$(gofmt -l $files)"
+          unformatted=$(find . -name '*.go' -not -path './.git/*' -not -path './.tools/*' -not -path './.artifacts/*' -print0 | xargs -0 -r gofmt -l)
+          if [[ -n "$unformatted" ]]; then
+            printf 'Run gofmt on these files:\n%s\n' "$unformatted"
+            exit 1
+          fi
       - name: Test, race detector, vet and build
         run: bash scripts/verify.sh --race
       - name: Fuzz sanitizer
@@ -96,8 +99,8 @@ jobs:
       GOTOOLCHAIN: local
       CGO_ENABLED: '0'
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version: ${{ matrix.go }}
           check-latest: true
@@ -119,8 +122,8 @@ jobs:
     env:
       GOTOOLCHAIN: local
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version: '1.27.x'
           check-latest: true

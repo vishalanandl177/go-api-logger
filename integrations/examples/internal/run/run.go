@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"syscall"
 	"time"
 )
 
@@ -24,7 +25,7 @@ func Serve(router http.Handler) {
 		log.Fatal(err)
 	}
 	server := &http.Server{Addr: "127.0.0.1:8080", Handler: httpmw.Middleware(logger)(router), ReadHeaderTimeout: 5 * time.Second}
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	done := make(chan error, 1)
 	go func() { done <- server.ListenAndServe() }()
@@ -39,6 +40,7 @@ func Serve(router http.Handler) {
 	shutdown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	if err := server.Shutdown(shutdown); err != nil {
 		log.Print(err)
+		_ = server.Close()
 	}
 	cancel()
 	flush, cancel := context.WithTimeout(context.Background(), 5*time.Second)

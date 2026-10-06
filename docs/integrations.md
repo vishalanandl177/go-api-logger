@@ -31,20 +31,43 @@ The integration module pins verified Go proxy versions: Gin 1.12.0, chi 5.3.2, E
 
 ## Prometheus
 
-Construct an observer with an application-owned registry. Supply finite allowlists of route templates, output names and security rule IDs. Unknown routes and rule IDs collapse to `other`; unknown output names are ignored. HTTP methods, status classes, severity, stage and outcome labels use fixed enumerations. IDs, IP addresses, raw URLs, bodies, error text and query strings are never metric labels. Each allowlist is capped at 256 entries.
+Construct an observer with an application-owned registry. Supply finite allowlists of route templates, output names and security rule IDs. Match the framework's actual route string: a method-qualified ServeMux pattern is `GET /users/{id}`, chi uses `/users/{id}`, and Gin or Echo use `/users/:id`. Unknown routes and rule IDs collapse to `other`; unknown output names are ignored. HTTP methods, status classes, severity, stage and outcome labels use fixed enumerations. IDs, IP addresses, raw URLs, bodies, error text and query strings are never metric labels. Each allowlist is capped at 256 entries.
+
+Call this setup function before passing `config` to `apilog.New`. It mounts the protected handler on the application's existing mux:
 
 ```go
-registry := prometheus.NewRegistry()
-metrics, err := apimetrics.New(registry, apimetrics.Options{
-    Routes: []string{"/users/{id}"},
-    Outputs: []string{"database"},
-    SlowThreshold: 200 * time.Millisecond,
-})
-if err != nil { return err }
-config.Observer = metrics
+package example
+
+import (
+    "net/http"
+
+    "github.com/prometheus/client_golang/prometheus"
+    apilog "github.com/vishalanandl177/go-api-logger"
+    apimetrics "github.com/vishalanandl177/go-api-logger/integrations/prometheus"
+)
+
+func ConfigureMetrics(config *apilog.Config, mux *http.ServeMux,
+    authorizeMetricsRequest func(*http.Request) bool) error {
+    registry := prometheus.NewRegistry()
+    metrics, err := apimetrics.New(registry, apimetrics.Options{
+        Routes: []string{"GET /users/{id}"},
+        Outputs: []string{"database"},
+        SlowThreshold: config.SlowThreshold,
+    })
+    if err != nil { return err }
+    metricsHandler, err := apimetrics.Handler(registry, authorizeMetricsRequest)
+    if err != nil { return err }
+    mux.Handle("/internal/metrics", metricsHandler)
+    if config.Observer == nil {
+        config.Observer = metrics
+    } else {
+        config.Observer = apilog.ObserverGroup{config.Observer, metrics}
+    }
+    return nil
+}
 ```
 
-Expose that registry through the application's existing authenticated metrics endpoint using `promhttp.HandlerFor`. The adapter does not register an HTTP endpoint or use the global registry. Match `SlowThreshold` to the core logger setting. Disable groups independently with `DisableAPI`, `DisableProfiling`, `DisableHealth`, and `DisableSecurity`.
+The authorization callback is required and returns whether the caller may scrape metrics. The handler accepts GET and HEAD, sends no-store headers, and automatically excludes its own request from log outputs even at a custom mount path. API metadata metrics still observe these requests. It uses `promhttp.HandlerFor` internally and starts no server. Applications with their own protected endpoint can use that registry directly. The adapter does not use the global registry. Match `SlowThreshold` to the core logger setting. Disable groups independently with `DisableAPI`, `DisableProfiling`, `DisableHealth`, and `DisableSecurity`.
 
 | Group | Metric names |
 | --- | --- |
@@ -59,20 +82,40 @@ Use one metrics observer per logger lifecycle. Pipeline counters tolerate stale 
 
 ## OpenTelemetry
 
-`integrations/otel.Observer` annotates the existing active span with event/request IDs, route, status, duration and bounded profile summaries. It creates no spans, providers, exporters or network calls. Application tracing middleware must wrap HTTP capture so the span remains active when the event finishes:
+`integrations/otel.Observer` annotates the existing active span with event/request IDs, route, status, duration and bounded profile summaries. It creates no spans, providers, exporters or network calls. Application tracing middleware must wrap HTTP capture so the span remains active when the event finishes. Configure observers before constructing the logger; changing a copied config afterward has no effect:
 
 ```go
-config.Observer = apilog.ObserverGroup{metrics, apiotel.Observer{}}
-handler := existingTracing(httpmw.Middleware(logger)(apiotel.Context(router)))
+package example
+
+import (
+    "net/http"
+
+    apilog "github.com/vishalanandl177/go-api-logger"
+    "github.com/vishalanandl177/go-api-logger/httpmw"
+    apiotel "github.com/vishalanandl177/go-api-logger/integrations/otel"
+)
+
+func WithTracing(config apilog.Config, router http.Handler,
+    existingTracing func(http.Handler) http.Handler) (*apilog.Logger, http.Handler, error) {
+    if config.Observer == nil {
+        config.Observer = apiotel.Observer{}
+    } else {
+        config.Observer = apilog.ObserverGroup{config.Observer, apiotel.Observer{}}
+    }
+    logger, err := apilog.New(config)
+    if err != nil { return nil, nil, err }
+    handler := existingTracing(httpmw.Middleware(logger)(apiotel.Context(router)))
+    return logger, handler, nil
+}
 ```
 
-`apiotel.Context` copies the active trace ID into the canonical API event field. Arbitrary application context, bodies, headers and SQL are excluded from span attributes. The application owns trace sampling and export.
+The caller drains its HTTP server and then calls `logger.Shutdown` as shown in the root quick start. `apiotel.Context` copies the active trace ID into the canonical API event field. Enable `config.Correlation.Enabled` before construction to also generate or accept request IDs. Arbitrary application context, bodies, headers and SQL are excluded from span attributes. The application owns trace sampling and export.
 
 ## Sentry
 
 `integrations/sentry.Context` clones the application's hub per request and preserves the configured client and scope. Place it outside capture, or use an existing Sentry HTTP middleware that already supplies a request-local hub. `Observer` only enriches that local scope with an event ID, correlation IDs, route, status, duration and profile count. It never captures or sends an exception.
 
-Call `apisentry.AttachCorrelation(ctx)` immediately before an application's own `CaptureException` call. Final observer enrichment happens after the handler, so it cannot retroactively enrich an event already sent. Bodies, query strings, SQL and arbitrary context fields are not copied. The global Sentry scope is never modified.
+Register `apisentry.Observer{}` in `config.Observer` before logger construction, composing existing observers with `apilog.ObserverGroup`. Enable `config.Correlation.Enabled` to populate request IDs. Call `apisentry.AttachCorrelation(ctx)` immediately before the request-local hub's `CaptureException` call, using `sentry.GetHubFromContext(ctx)` rather than the global capture function. Final observer enrichment happens after the handler, so it cannot retroactively enrich an event already sent. Bodies, query strings, SQL and arbitrary context fields are not copied. The global Sentry scope is never modified.
 
 ## Tests
 

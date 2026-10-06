@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"maps"
 	"math/rand/v2"
 	"regexp"
 	"sort"
@@ -204,6 +205,9 @@ func ProfilingSuppressed(ctx context.Context) bool { b, _ := ctx.Value(suppressK
 func (x *Exchange) CaptureAllowed(request bool) bool {
 	x.mu.Lock()
 	e := x.event
+	e.Context = maps.Clone(x.event.Context)
+	e.RequestHeaders = copyHeaders(x.event.RequestHeaders)
+	e.ResponseHeaders = copyHeaders(x.event.ResponseHeaders)
 	skipped := x.suppressed
 	x.mu.Unlock()
 	if skipped {

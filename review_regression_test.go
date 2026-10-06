@@ -102,3 +102,26 @@ func TestReviewFlushTriggersIndependentOutputsBeforeWaiting(t *testing.T) {
 		t.Fatal("blocked first output prevented independent second output from being flushed")
 	}
 }
+
+func TestReviewCapturePolicyContextSnapshotIsolatedFromSetContext(t *testing.T) {
+	entered, resume := make(chan struct{}), make(chan struct{})
+	observed := make(chan string, 1)
+	l, _ := newTestLogger(t, func(c *Config) {
+		c.Policy = func(e Event) (Decision, error) {
+			close(entered)
+			<-resume
+			observed <- e.Context["actor_id"]
+			return Decision{}, nil
+		}
+	})
+	ctx, exchange := l.Begin(context.Background(), Event{Context: map[string]string{"actor_id": "original"}})
+	done := make(chan struct{})
+	go func() { defer close(done); exchange.CaptureAllowed(true) }()
+	<-entered
+	SetContext(ctx, map[string]string{"actor_id": "updated"})
+	close(resume)
+	<-done
+	if got := <-observed; got != "original" {
+		t.Fatalf("policy snapshot aliases live context: got %q, want original", got)
+	}
+}

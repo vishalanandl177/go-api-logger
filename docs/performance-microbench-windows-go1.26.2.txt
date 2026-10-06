@@ -2,26 +2,26 @@ goos: windows
 goarch: amd64
 pkg: github.com/vishalanandl177/go-api-logger
 cpu: Intel(R) Core(TM) i9-14900KS
-BenchmarkEmit/body-2         	   64496	     19074 ns/op	   12793 B/op	     124 allocs/op
-BenchmarkEmit/body-2         	   63614	     19881 ns/op	   12793 B/op	     124 allocs/op
-BenchmarkEmit/body-2         	   52305	     25425 ns/op	   12793 B/op	     124 allocs/op
-BenchmarkEmit/metadata-2     	   54649	     20817 ns/op	   12487 B/op	     121 allocs/op
-BenchmarkEmit/metadata-2     	   59900	     20162 ns/op	   12487 B/op	     121 allocs/op
-BenchmarkEmit/metadata-2     	   56510	     20208 ns/op	   12488 B/op	     121 allocs/op
+BenchmarkEmit/body-2         	   59936	     19746 ns/op	         1.000 delivered/op	         0 dropped/op	   12937 B/op	     126 allocs/op
+BenchmarkEmit/body-2         	   63435	     19223 ns/op	         1.000 delivered/op	         0 dropped/op	   12937 B/op	     126 allocs/op
+BenchmarkEmit/body-2         	   60966	     22375 ns/op	         1.000 delivered/op	         0 dropped/op	   12937 B/op	     126 allocs/op
+BenchmarkEmit/metadata-2     	   86542	     14522 ns/op	         1.000 delivered/op	         0 dropped/op	    6862 B/op	      58 allocs/op
+BenchmarkEmit/metadata-2     	   79588	     14722 ns/op	         1.000 delivered/op	         0 dropped/op	    6862 B/op	      58 allocs/op
+BenchmarkEmit/metadata-2     	   82426	     13523 ns/op	         1.000 delivered/op	         0 dropped/op	    6862 B/op	      58 allocs/op
 PASS
 ok  	github.com/vishalanandl177/go-api-logger	7.741s
 goos: windows
 goarch: amd64
 pkg: github.com/vishalanandl177/go-api-logger/httpmw
 cpu: Intel(R) Core(TM) i9-14900KS
-BenchmarkMiddleware/baseline-2         	  582470	      1944 ns/op	    6104 B/op	      18 allocs/op
-BenchmarkMiddleware/baseline-2         	  520092	      1949 ns/op	    6104 B/op	      18 allocs/op
-BenchmarkMiddleware/baseline-2         	  585319	      1944 ns/op	    6104 B/op	      18 allocs/op
-BenchmarkMiddleware/metadata-2         	  113395	     10076 ns/op	   13833 B/op	      66 allocs/op
-BenchmarkMiddleware/metadata-2         	  122570	      9786 ns/op	   13833 B/op	      66 allocs/op
-BenchmarkMiddleware/metadata-2         	  127964	      9785 ns/op	   13833 B/op	      66 allocs/op
-BenchmarkMiddleware/body-2             	   95029	     12558 ns/op	   16258 B/op	      87 allocs/op
-BenchmarkMiddleware/body-2             	   96164	     12474 ns/op	   16258 B/op	      87 allocs/op
-BenchmarkMiddleware/body-2             	   91962	     12819 ns/op	   16258 B/op	      87 allocs/op
+BenchmarkMiddleware/baseline-2         	  571080	      1924 ns/op	    6104 B/op	      18 allocs/op
+BenchmarkMiddleware/baseline-2         	  657721	      1900 ns/op	    6104 B/op	      18 allocs/op
+BenchmarkMiddleware/baseline-2         	  666843	      2083 ns/op	    6104 B/op	      18 allocs/op
+BenchmarkMiddleware/metadata-2         	   57966	     20208 ns/op	         1.000 delivered/op	         0 dropped/op	   16882 B/op	      96 allocs/op
+BenchmarkMiddleware/metadata-2         	   62426	     19471 ns/op	         1.000 delivered/op	         0 dropped/op	   16882 B/op	      96 allocs/op
+BenchmarkMiddleware/metadata-2         	   58041	     20682 ns/op	         1.000 delivered/op	         0 dropped/op	   16882 B/op	      96 allocs/op
+BenchmarkMiddleware/body-2             	   43995	     27191 ns/op	         1.000 delivered/op	         0 dropped/op	   19371 B/op	     119 allocs/op
+BenchmarkMiddleware/body-2             	   43810	     27257 ns/op	         1.000 delivered/op	         0 dropped/op	   19372 B/op	     119 allocs/op
+BenchmarkMiddleware/body-2             	   45943	     26326 ns/op	         1.000 delivered/op	         0 dropped/op	   19371 B/op	     119 allocs/op
 PASS
-ok  	github.com/vishalanandl177/go-api-logger/httpmw	10.892s
+ok  	github.com/vishalanandl177/go-api-logger/httpmw	11.553s

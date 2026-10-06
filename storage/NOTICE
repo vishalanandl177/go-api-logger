@@ -1,0 +1,6 @@
+Go API Logger
+Copyright 2026 Vishal Anand and contributors
+
+Inspired by DRF-API-Logger, Copyright its respective contributors.
+Both projects are available under the Apache License, Version 2.0.
+Security rule identifiers preserve the DRF-API-Logger registry for compatibility.

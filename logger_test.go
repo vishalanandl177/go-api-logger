@@ -288,15 +288,26 @@ func BenchmarkEmit(b *testing.B) {
 		b.Run(name, func(b *testing.B) {
 			cfg := DefaultConfig()
 			cfg.MetadataOnly = metadata
-			cfg.Outputs = []Output{{Name: "discard", Sink: SinkFunc(func(context.Context, []Event) error { return nil })}}
+			cfg.Outputs = []Output{{Name: "discard", Kind: "storage", Sink: SinkFunc(func(context.Context, []Event) error { return nil })}}
 			l, err := New(cfg)
 			if err != nil {
 				b.Fatal(err)
 			}
-			defer l.Shutdown(context.Background())
+			b.Cleanup(func() {
+				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				if err := l.Shutdown(ctx); err != nil {
+					b.Fatal(err)
+				}
+				health := l.Health().Outputs["discard"]
+				b.ReportMetric(float64(health.Delivered)/float64(b.N), "delivered/op")
+				b.ReportMetric(float64(health.Dropped)/float64(b.N), "dropped/op")
+				if health.Failed != 0 {
+					b.Fatalf("discard sink failed %d events", health.Failed)
+				}
+			})
 			e := sampleEvent()
 			b.ReportAllocs()
-			b.ResetTimer()
 			for b.Loop() {
 				l.Emit(context.Background(), e)
 			}

@@ -83,36 +83,9 @@ func wrapConn(c driver.Conn) driver.Conn {
 	if _, ok := c.(interface{ apilogConn() driver.Conn }); ok {
 		return c
 	}
-	w := &conn{inner: c}
-	_, reset := c.(driver.SessionResetter)
-	_, valid := c.(driver.Validator)
-	switch {
-	case reset && valid:
-		return &resetValidConn{conn: w}
-	case reset:
-		return &resetConn{conn: w}
-	case valid:
-		return &validConn{conn: w}
-	default:
-		return w
-	}
+	return optionalConn(&conn{inner: c})
 }
 
-// database/sql checks the presence of both interfaces when deciding whether a
-// canceled transaction's connection can safely return to the pool. Advertising
-// no-op implementations would change that decision for legacy drivers.
-type resetConn struct{ *conn }
-type validConn struct{ *conn }
-type resetValidConn struct{ *conn }
-
-func (c *resetConn) ResetSession(ctx context.Context) error {
-	return c.inner.(driver.SessionResetter).ResetSession(ctx)
-}
-func (c *validConn) IsValid() bool { return c.inner.(driver.Validator).IsValid() }
-func (c *resetValidConn) ResetSession(ctx context.Context) error {
-	return c.inner.(driver.SessionResetter).ResetSession(ctx)
-}
-func (c *resetValidConn) IsValid() bool { return c.inner.(driver.Validator).IsValid() }
 func (c *conn) apilogConn() driver.Conn { return c.inner }
 
 // UnwrapConn supports driver-specific operations inside sql.Conn.Raw. Wrapping
@@ -192,7 +165,7 @@ func values(named []driver.NamedValue) ([]driver.Value, error) {
 	}
 	return v, nil
 }
-func (c *conn) ExecContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Result, error) {
+func (c *conn) execContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Result, error) {
 	start := time.Now()
 	var result driver.Result
 	var err error
@@ -213,7 +186,7 @@ func (c *conn) ExecContext(ctx context.Context, query string, args []driver.Name
 	}
 	return result, err
 }
-func (c *conn) QueryContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Rows, error) {
+func (c *conn) queryContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Rows, error) {
 	start := time.Now()
 	var result driver.Rows
 	var err error
@@ -238,9 +211,16 @@ type stmt struct {
 	connChecker driver.NamedValueChecker
 }
 
-func newStmt(s driver.Stmt, query string, c driver.Conn) *stmt {
+func newStmt(s driver.Stmt, query string, c driver.Conn) driver.Stmt {
 	n, _ := c.(driver.NamedValueChecker)
-	return &stmt{inner: s, query: query, connChecker: n}
+	w := &stmt{inner: s, query: query, connChecker: n}
+	if converter, ok := s.(driver.ColumnConverter); ok {
+		return &struct {
+			*stmt
+			driver.ColumnConverter
+		}{w, converter}
+	}
+	return w
 }
 func (s *stmt) Close() error                                    { return s.inner.Close() }
 func (s *stmt) NumInput() int                                   { return s.inner.NumInput() }
@@ -254,12 +234,6 @@ func (s *stmt) CheckNamedValue(v *driver.NamedValue) error {
 		return s.connChecker.CheckNamedValue(v)
 	}
 	return driver.ErrSkip
-}
-func (s *stmt) ColumnConverter(index int) driver.ValueConverter {
-	if c, ok := s.inner.(driver.ColumnConverter); ok {
-		return c.ColumnConverter(index)
-	}
-	return driver.DefaultParameterConverter
 }
 func (s *stmt) ExecContext(ctx context.Context, args []driver.NamedValue) (driver.Result, error) {
 	start := time.Now()

@@ -19,6 +19,17 @@ var defaultMaskKeys = []string{"password", "token", "access", "refresh", "author
 func normalized(s string) string {
 	return strings.ReplaceAll(strings.ToLower(strings.TrimSpace(s)), "-", "_")
 }
+
+func copyHeaders(h map[string][]string) map[string][]string {
+	if h == nil {
+		return nil
+	}
+	result := make(map[string][]string, len(h))
+	for k, v := range h {
+		result[k] = append([]string(nil), v...)
+	}
+	return result
+}
 func keySet(extra []string) map[string]bool {
 	m := make(map[string]bool, len(defaultMaskKeys)+len(extra))
 	for _, k := range defaultMaskKeys {

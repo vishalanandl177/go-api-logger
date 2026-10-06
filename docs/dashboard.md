@@ -33,7 +33,7 @@ func LogDashboard(store apilog.Store, authorize func(*http.Request, dashboard.Ac
 
 Mount the returned handler at `/ops/api-logs/` in your existing router, behind the application's authentication middleware. `BasePath` must match the full externally visible path passed to the handler; do not strip that prefix. With `net/http`, use `mux.Handle("/ops/api-logs/", handler)`. Framework routers can mount this same `http.Handler` using their standard handler bridge.
 
-Exclude the dashboard mount from API capture to avoid logging requests made while browsing the logs. Keep the dashboard on an internal or otherwise appropriately restricted application route. The handler never writes its own access logs.
+The dashboard automatically marks its own requests as excluded from API capture, including custom mount paths, chart endpoints, and assets. It does not persist or export the logs being inspected. Keep the dashboard on an internal or otherwise appropriately restricted application route. Safe request metrics can still observe these requests.
 
 ### Options and defaults
 

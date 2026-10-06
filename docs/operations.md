@@ -4,15 +4,16 @@ Run the optional CLI from its module:
 
 ```sh
 cd cmd
-go build -o apilog ./apilog
+mkdir -p ../.artifacts
+go build -o ../.artifacts/apilog ./apilog
 export API_LOGGER_DSN='api-logs.db'
-./apilog migrate --driver sqlite
-./apilog doctor --driver sqlite --format json
-./apilog prune --driver sqlite --days 30 --dry-run
-./apilog prune --driver sqlite --days 30
+../.artifacts/apilog migrate --driver sqlite
+../.artifacts/apilog doctor --driver sqlite --format json
+../.artifacts/apilog prune --driver sqlite --days 30 --dry-run
+../.artifacts/apilog prune --driver sqlite --days 30
 ```
 
-PowerShell uses `$env:API_LOGGER_DSN = 'api-logs.db'` and `.\apilog.exe` after building `go build -o apilog.exe ./apilog`. Use `--driver postgres` or `--driver mysql` with the corresponding driver DSN. `--dsn-env NAME` reads a different environment variable. Connection strings are not accepted as positional arguments and are never printed in diagnostics. The CLI opens and closes its own pool; library callers retain ownership of theirs.
+PowerShell uses `New-Item -ItemType Directory -Force ../.artifacts`, `$env:API_LOGGER_DSN = 'api-logs.db'` and `..\.artifacts\apilog.exe` after building `go build -o ../.artifacts/apilog.exe ./apilog`. Use `--driver postgres` or `--driver mysql` with the corresponding driver DSN. `--dsn-env NAME` reads a different environment variable. Connection strings are not accepted as positional arguments and are never printed in diagnostics. The CLI opens and closes its own pool; library callers retain ownership of theirs.
 
 ## Migration and readiness
 

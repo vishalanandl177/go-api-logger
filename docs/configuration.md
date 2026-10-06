@@ -23,7 +23,7 @@ Rules are evaluated in order and combine restrictively: a later rule cannot re-e
 
 `Policy func(Event) (Decision, error)` is evaluated during capture and after completion. It must handle a zero status during capture. Errors/panics strip headers/bodies/query and disable export, while safe metadata can still be persisted. `Transform` sees sanitized data and may return nil to drop an event. Transformed fields pass through redaction again. Persisted `ExportDisabled` also blocks dashboard export.
 
-Bodies have explicit `complete`, `empty`, `unread`, `incomplete`, `oversized`, `invalid`, `unsupported`, `encoded`, `file`, `streaming`, `upgraded`, or `omitted` states. Bytes represent observed bytes, not always the original full payload size. Compressed, file, multipart and streaming content is not decompressed or buffered for logging. A custom `Sanitizer` can support additional explicitly configured content types, but must return valid sanitized JSON; built-in sensitive-key masking is applied to that JSON too.
+Bodies have explicit `complete`, `empty`, `unread`, `incomplete`, `oversized`, `invalid`, `unsupported`, `encoded`, `file`, `streaming`, `upgraded`, `header_only`, or `omitted` states. Bytes represent observed bytes, not always the original full payload size. Compressed, file, multipart and streaming content is not decompressed or buffered for logging. HEAD responses retain no body bytes because no response payload is transmitted. `Body.Encoding="json"` marks canonical sanitized JSON while `ContentType` retains the original media type. A custom `Sanitizer` can support additional explicitly configured content types, but must return valid sanitized JSON; built-in sensitive-key masking is applied to that JSON too.
 
 ## Custom outputs
 

@@ -67,8 +67,12 @@ func (*Tracer) TraceCopyFromEnd(ctx context.Context, _ *pgx.Conn, data pgx.Trace
 	}
 }
 func (*Tracer) TraceBatchStart(ctx context.Context, _ *pgx.Conn, _ pgx.TraceBatchStartData) context.Context {
-	apilog.MarkInstrumented(ctx)
-	return context.WithValue(ctx, batchKey{}, batchState{time.Now(), apilog.StartStage(ctx, "sql.batch")})
+	state := batchState{start: time.Now(), finish: func() {}}
+	if !apilog.ProfilingSuppressed(ctx) {
+		apilog.MarkInstrumented(ctx)
+		state.finish = apilog.StartStage(ctx, "sql.batch")
+	}
+	return context.WithValue(ctx, batchKey{}, state)
 }
 func (*Tracer) TraceBatchQuery(ctx context.Context, _ *pgx.Conn, data pgx.TraceBatchQueryData) {
 	if s, ok := ctx.Value(batchKey{}).(batchState); ok {
@@ -81,7 +85,11 @@ func (*Tracer) TraceBatchEnd(ctx context.Context, _ *pgx.Conn, _ pgx.TraceBatchE
 	}
 }
 func (*Tracer) TraceAcquireStart(ctx context.Context, _ *pgxpool.Pool, _ pgxpool.TraceAcquireStartData) context.Context {
-	return context.WithValue(ctx, acquireKey{}, apilog.StartStage(ctx, "sql.pool.acquire"))
+	finish := func() {}
+	if !apilog.ProfilingSuppressed(ctx) {
+		finish = apilog.StartStage(ctx, "sql.pool.acquire")
+	}
+	return context.WithValue(ctx, acquireKey{}, finish)
 }
 func (*Tracer) TraceAcquireEnd(ctx context.Context, _ *pgxpool.Pool, _ pgxpool.TraceAcquireEndData) {
 	if end, ok := ctx.Value(acquireKey{}).(func()); ok {

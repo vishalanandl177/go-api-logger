@@ -403,19 +403,36 @@ func TestUnavailableSQLAndUnsentStatusAreExplicit(t *testing.T) {
 }
 
 func TestDashboardAutomaticallyExcludesItsOwnRequests(t *testing.T) {
-	for _,target:=range []string{"/custom/inspect/","/custom/inspect/charts/requests","/custom/inspect/events/first","/custom/inspect/assets/dashboard.css"} {
-		t.Run(target,func(t *testing.T){
-			persisted:=make(chan apilog.Event,4)
-			config:=apilog.DefaultConfig()
-			config.Outputs=[]apilog.Output{{Name:"test",Kind:"storage",Sink:apilog.SinkFunc(func(_ context.Context,events []apilog.Event)error{for _,e:=range events{persisted<-e};return nil})}}
-			logger,err:=apilog.New(config);if err!=nil{t.Fatal(err)}
+	for _, target := range []string{"/custom/inspect/", "/custom/inspect/charts/requests", "/custom/inspect/events/first", "/custom/inspect/assets/dashboard.css"} {
+		t.Run(target, func(t *testing.T) {
+			persisted := make(chan apilog.Event, 4)
+			config := apilog.DefaultConfig()
+			config.Outputs = []apilog.Output{{Name: "test", Kind: "storage", Sink: apilog.SinkFunc(func(_ context.Context, events []apilog.Event) error {
+				for _, e := range events {
+					persisted <- e
+				}
+				return nil
+			})}}
+			logger, err := apilog.New(config)
+			if err != nil {
+				t.Fatal(err)
+			}
 			defer logger.Shutdown(context.Background())
-			h:=makeHandler(t,&memoryStore{events:[]apilog.Event{sampleEvent()}},Options{BasePath:"/custom/inspect"})
-			w:=request(httpmw.Middleware(logger)(h),"GET",target,"")
-			if w.Code!=200{t.Fatalf("dashboard request failed: %d %s",w.Code,w.Body.String())}
-			ctx,cancel:=context.WithTimeout(context.Background(),time.Second);defer cancel()
-			if err:=logger.Flush(ctx);err!=nil{t.Fatal(err)}
-			select{case e:=<-persisted:t.Fatalf("dashboard request was persisted: %s",e.URL);default:}
+			h := makeHandler(t, &memoryStore{events: []apilog.Event{sampleEvent()}}, Options{BasePath: "/custom/inspect"})
+			w := request(httpmw.Middleware(logger)(h), "GET", target, "")
+			if w.Code != 200 {
+				t.Fatalf("dashboard request failed: %d %s", w.Code, w.Body.String())
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			defer cancel()
+			if err := logger.Flush(ctx); err != nil {
+				t.Fatal(err)
+			}
+			select {
+			case e := <-persisted:
+				t.Fatalf("dashboard request was persisted: %s", e.URL)
+			default:
+			}
 		})
 	}
 }

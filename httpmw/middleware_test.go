@@ -314,15 +314,31 @@ func TestTrustedProxyAndCorrelation(t *testing.T) {
 func BenchmarkMiddleware(b *testing.B) {
 	for _, mode := range []string{"baseline", "metadata", "body"} {
 		b.Run(mode, func(b *testing.B) {
-			cfg := apilog.DefaultConfig()
-			cfg.MetadataOnly = mode == "metadata"
-			l, _ := apilog.New(cfg)
-			defer l.Shutdown(context.Background())
 			var handler http.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
 				_, _ = io.WriteString(w, `{"ok":true}`)
 			})
 			if mode != "baseline" {
+				cfg := apilog.DefaultConfig()
+				cfg.MetadataOnly = mode == "metadata"
+				cfg.Outputs = []apilog.Output{{Name: "discard", Kind: "storage", Sink: apilog.SinkFunc(func(context.Context, []apilog.Event) error { return nil })}}
+				l, err := apilog.New(cfg)
+				if err != nil {
+					b.Fatal(err)
+				}
+				b.Cleanup(func() {
+					ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+					defer cancel()
+					if err := l.Shutdown(ctx); err != nil {
+						b.Fatal(err)
+					}
+					health := l.Health().Outputs["discard"]
+					b.ReportMetric(float64(health.Delivered)/float64(b.N), "delivered/op")
+					b.ReportMetric(float64(health.Dropped)/float64(b.N), "dropped/op")
+					if health.Failed != 0 {
+						b.Fatalf("discard sink failed %d events", health.Failed)
+					}
+				})
 				handler = Middleware(l)(handler)
 			}
 			b.ReportAllocs()

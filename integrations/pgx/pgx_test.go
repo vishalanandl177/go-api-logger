@@ -3,6 +3,7 @@ package pgx
 import (
 	"context"
 	"github.com/jackc/pgx/v5"
+	apilog "github.com/vishalanandl177/go-api-logger"
 	"github.com/vishalanandl177/go-api-logger/integrations/internal/testutil"
 	"os"
 	"testing"
@@ -94,5 +95,28 @@ func TestPostgresNativeQueriesBatchAndCopy(t *testing.T) {
 	e := finish()
 	if e.Profile.QueryCount != 5 {
 		t.Fatalf("profile=%+v", e.Profile)
+	}
+}
+
+func TestUnfinishedBatchMarksProfileIncomplete(t *testing.T) {
+	ctx, finish := testutil.Exchange(t)
+	tracer := &Tracer{}
+	batchCtx := tracer.TraceBatchStart(ctx, nil, pgx.TraceBatchStartData{})
+	e := finish()
+	if !e.Profile.Incomplete || !e.Profile.Instrumented || e.Profile.QueryCount != 0 {
+		t.Fatalf("submitted statements cannot be assumed executed: %+v", e.Profile)
+	}
+	tracer.TraceBatchEnd(batchCtx, nil, pgx.TraceBatchEndData{})
+}
+
+func TestSuppressedBatchDoesNotInstrumentOuterProfile(t *testing.T) {
+	ctx, finish := testutil.Exchange(t)
+	tracer := &Tracer{}
+	batchCtx := tracer.TraceBatchStart(apilog.SuppressProfiling(ctx), nil, pgx.TraceBatchStartData{})
+	tracer.TraceBatchQuery(batchCtx, nil, pgx.TraceBatchQueryData{SQL: "SELECT 1"})
+	tracer.TraceBatchEnd(batchCtx, nil, pgx.TraceBatchEndData{})
+	e := finish()
+	if e.Profile.Instrumented || e.Profile.Incomplete || e.Profile.QueryCount != 0 || len(e.Profile.Stages) != 0 {
+		t.Fatalf("suppressed batch changed profile: %+v", e.Profile)
 	}
 }
