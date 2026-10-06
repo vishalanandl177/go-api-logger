@@ -10,7 +10,7 @@ require (
 	github.com/labstack/echo/v4 v4.16.0
 	github.com/labstack/echo/v5 v5.4.0
 	github.com/prometheus/client_golang v1.24.1
-	github.com/vishalanandl177/go-api-logger v1.0.0
+	github.com/vishalanandl177/go-api-logger v1.0.1
 	go.opentelemetry.io/otel v1.47.0
 	go.opentelemetry.io/otel/sdk v1.47.0
 	go.opentelemetry.io/otel/trace v1.47.0

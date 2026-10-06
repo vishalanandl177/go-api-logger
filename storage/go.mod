@@ -5,7 +5,7 @@ go 1.26.0
 require (
 	github.com/go-sql-driver/mysql v1.10.1
 	github.com/jackc/pgx/v5 v5.11.0
-	github.com/vishalanandl177/go-api-logger v1.0.0
+	github.com/vishalanandl177/go-api-logger v1.0.1
 	modernc.org/sqlite v1.60.1
 )
 
