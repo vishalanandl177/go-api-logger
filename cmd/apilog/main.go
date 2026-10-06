@@ -115,7 +115,11 @@ func run(args []string, out, errOut io.Writer, getenv func(string) string, now f
 	case "mysql":
 		store, db, err = storage.OpenMySQL(ctx, dsn)
 	case "sqlite":
-		store, db, err = storage.OpenSQLite(ctx, dsn)
+		if command == "doctor" || (command == "prune" && *dryRun) {
+			store, db, err = storage.OpenSQLiteReadOnly(ctx, dsn)
+		} else {
+			store, db, err = storage.OpenSQLite(ctx, dsn)
+		}
 	}
 	if err != nil {
 		add("DB_CONNECT", "error", "Database connection failed. Verify credentials, network, driver and timeout.")

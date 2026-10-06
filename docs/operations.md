@@ -21,6 +21,8 @@ PowerShell uses `New-Item -ItemType Directory -Force ../.artifacts`, `$env:API_L
 
 `doctor` checks connectivity, exact schema version, and required columns without reading payloads or changing tables. It emits coded `ok`, `warning`, or `error` results in text or JSON. `--fail-level error` is the default; `--fail-level warning` also fails on warnings. An error exits 1; invalid command options exit 2; successful commands exit 0. `--timeout 30s` bounds the entire database operation and can be changed.
 
+For SQLite, `doctor` and `prune --dry-run` open an existing file with `mode=ro`, so a missing database is never created. Diagnostic DSNs accept plain filenames or `file:` URIs and only the `mode` and `cache` parameters. Supplied writable modes are replaced with `ro`; memory databases, duplicate parameters, `_pragma`, driver shorthand options and other parameters are rejected before opening. Use a separate DSN without connection-time configuration for these diagnostic commands.
+
 A standalone doctor process cannot inspect a running application's worker, queue, policies, body limits or profiling configuration. It explicitly reports `RUNTIME_NOT_INSPECTED` as a warning. Inspect the application's in-process `logger.Health()` together with the configuration validated by logger construction. Monitor worker availability, accepted/delivered/dropped/failed counts, queued events/bytes, in-flight batches and write duration. The CLI does not start a dummy worker or report its health as the application's health.
 
 ## Retention

@@ -67,13 +67,16 @@ func ConfigureMetrics(config *apilog.Config, mux *http.ServeMux,
 }
 ```
 
-The authorization callback is required and returns whether the caller may scrape metrics. The handler accepts GET and HEAD, sends no-store headers, and automatically excludes its own request from log outputs even at a custom mount path. API metadata metrics still observe these requests. It uses `promhttp.HandlerFor` internally and starts no server. Applications with their own protected endpoint can use that registry directly. The adapter does not use the global registry. Match `SlowThreshold` to the core logger setting. Disable groups independently with `DisableAPI`, `DisableProfiling`, `DisableHealth`, and `DisableSecurity`.
+The authorization callback is required and returns whether the caller may scrape metrics. The handler accepts GET and HEAD, sends no-store headers, and automatically excludes its own request from log outputs even at a custom mount path. API metadata metrics still observe these requests. It uses `promhttp.HandlerFor` internally and starts no server. Applications with their own protected endpoint can use that registry directly. The adapter does not use the global registry. Match `SlowThreshold` to the core logger setting.
+
+All five metric groups are enabled by default and can be disabled independently with `DisableAPI`, `DisableProfiling`, `DisableLogger`, `DisablePipeline`, and `DisableSecurity`. Logger metrics cover synchronous capture work and skipped events; pipeline metrics cover asynchronous queue and delivery work. `DisableHealth` remains a convenience option that disables both logger and pipeline groups, regardless of those two individual flags. Existing `apilog_health_*` metric names remain unchanged.
 
 | Group | Metric names |
 | --- | --- |
 | API | `apilog_api_requests_total`, `apilog_api_duration_seconds`, `apilog_api_active_requests`, `apilog_api_body_bytes`, `apilog_api_slow_requests_total`, `apilog_api_exceptions_total`, `apilog_api_rate_limited_total` |
 | SQL profiling | `apilog_profile_query_count`, `apilog_profile_sql_duration_seconds`, `apilog_profile_duplicate_query_count`, `apilog_profile_n_plus_one_hints_total` |
-| Pipeline health | `apilog_health_queue_entries`, `apilog_health_queue_bytes`, `apilog_health_worker_running`, `apilog_health_events_total`, `apilog_health_last_write_seconds`, `apilog_health_operation_duration_seconds`, `apilog_health_skipped_total`, `apilog_health_batches_total`, `apilog_health_batch_size`, `apilog_health_flush_duration_seconds` |
+| Logger | `apilog_health_operation_duration_seconds`, `apilog_health_skipped_total` |
+| Pipeline | `apilog_health_queue_entries`, `apilog_health_queue_bytes`, `apilog_health_worker_running`, `apilog_health_events_total`, `apilog_health_last_write_seconds`, `apilog_health_batches_total`, `apilog_health_batch_size`, `apilog_health_flush_duration_seconds` |
 | Security | `apilog_security_signals_total` |
 
 Histogram families also expose their standard `_bucket`, `_sum` and `_count` series. Body sizes are bytes observed by capture, not inferred client traffic. Exception counts mean observed panics. SQL cumulative duration may exceed request duration because concurrent queries overlap. N+1 signals are suggestions for investigation.

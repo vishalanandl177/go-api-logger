@@ -15,6 +15,8 @@ logger, err := apilog.New(cfg)
 
 `OpenPostgres(ctx, dsn)` and `OpenMySQL(ctx, dsn)` return the same `(store, db, error)` shape. The Open helpers check connectivity but do not run migrations. Applications already owning a pool can call `NewPostgres(db)`, `NewMySQL(db)`, `NewSQLite(db)`, or `New(db, dialect)`. Stores never close or reconfigure caller-owned pools. OpenSQLite sets its newly created pool to one connection to support `:memory:` and serialize SQLite writes. Use a dedicated log database where possible.
 
+`OpenSQLiteReadOnly(ctx, dsn)` requires an existing file and forces SQLite's `mode=ro`. It accepts plain filenames and `file:` URIs, with optional `mode=ro|rw|rwc` and `cache=private|shared`; the mode is always replaced with `ro`. It rejects memory databases, duplicate parameters, PRAGMA/driver options and all other options before opening. Use a separate diagnostic DSN without `_pragma` or shorthand options. The returned store supports reads and dry-run pruning; writes fail at the database connection.
+
 ## Schema and writes
 
 Call `Migrate(ctx)` explicitly during deployment. Schema version 1 creates `api_logger_schema` and `api_logger_events`, with indexed timestamp, method, status, duration and nullable SQL count. Complete sanitized events are stored as JSON text, with a separate lowercased search document. All payload copies are already sanitized, so retention removes both together. No credentials, raw query text or connection strings appear in storage error messages.

@@ -16,6 +16,11 @@ import (
 type contextKey struct{}
 type suppressKey struct{}
 type interval struct{ start, end time.Time }
+type routeResolver struct {
+	mu      sync.Mutex
+	resolve func() (route, name, group string)
+	closed  bool
+}
 type Exchange struct {
 	mu                            sync.Mutex
 	logger                        *Logger
@@ -28,6 +33,7 @@ type Exchange struct {
 	active                        int
 	finished                      bool
 	suppressed                    bool
+	routeResolver                 *routeResolver
 	requestSample, responseSample []byte
 	captureDuration               time.Duration
 }
@@ -72,9 +78,74 @@ func SetRoute(ctx context.Context, route, name, group string) {
 		x.mu.Lock()
 		defer x.mu.Unlock()
 		if !x.finished {
+			x.routeResolver = nil
 			x.event.Route = route
 			x.event.Name = name
 			x.event.Group = group
+		}
+	}
+}
+
+// SetRouteResolver installs a request-local metadata reader for routers whose
+// route pattern becomes available only after middleware has entered. It is
+// called synchronously before body capture decisions. The reader must be fast,
+// safe to invoke during request handling, and must not call CaptureAllowed or
+// its own finalizer. A panic excludes the exchange from capture and outputs.
+//
+// Defer the returned finalizer immediately: it snapshots final metadata and
+// waits for active reads before detaching the reader, so pooled router state
+// can then be reused. Newer registrations and explicit SetRoute calls take
+// precedence; finalizing an outer registration never overwrites an inner one.
+func SetRouteResolver(ctx context.Context, resolve func() (route, name, group string)) func() {
+	x := exchange(ctx)
+	if x == nil || resolve == nil {
+		return func() {}
+	}
+	r := &routeResolver{resolve: resolve}
+	x.mu.Lock()
+	if x.finished {
+		x.mu.Unlock()
+		return func() {}
+	}
+	x.routeResolver = r
+	x.mu.Unlock()
+	return func() { x.resolveRoute(r, true) }
+}
+
+func (x *Exchange) resolveRoute(r *routeResolver, final bool) {
+	// Never acquire this lock while holding x.mu. Finalization is a barrier
+	// against both an active reader and a reader that already copied r.
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.closed {
+		return
+	}
+	if final {
+		defer func() { r.closed = true; r.resolve = nil }()
+	}
+	x.mu.Lock()
+	active := !x.finished && x.routeResolver == r
+	x.mu.Unlock()
+	if !active {
+		return
+	}
+	var route, name, group string
+	failed := true
+	func() {
+		defer func() { _ = recover() }()
+		route, name, group = r.resolve()
+		failed = false
+	}()
+	x.mu.Lock()
+	defer x.mu.Unlock()
+	if !x.finished && x.routeResolver == r {
+		if failed {
+			x.suppressed = true
+		} else {
+			x.event.Route, x.event.Name, x.event.Group = route, name, group
+		}
+		if final {
+			x.routeResolver = nil
 		}
 	}
 }
@@ -156,7 +227,7 @@ func SetTraceID(ctx context.Context, id string) {
 func (x *Exchange) InspectSamples(request, response []byte) {
 	x.mu.Lock()
 	defer x.mu.Unlock()
-	if x.finished || x.logger.security == nil {
+	if x.finished || x.suppressed || x.logger.security == nil {
 		return
 	}
 	c := x.logger.config.Security
@@ -204,11 +275,18 @@ func ProfilingSuppressed(ctx context.Context) bool { b, _ := ctx.Value(suppressK
 // enrichers have had an opportunity to install route metadata.
 func (x *Exchange) CaptureAllowed(request bool) bool {
 	x.mu.Lock()
+	r := x.routeResolver
+	finished := x.finished
+	x.mu.Unlock()
+	if r != nil && !finished {
+		x.resolveRoute(r, false)
+	}
+	x.mu.Lock()
 	e := x.event
 	e.Context = maps.Clone(x.event.Context)
 	e.RequestHeaders = copyHeaders(x.event.RequestHeaders)
 	e.ResponseHeaders = copyHeaders(x.event.ResponseHeaders)
-	skipped := x.suppressed
+	skipped := x.suppressed || x.finished || x.routeResolver != nil && x.routeResolver != r
 	x.mu.Unlock()
 	if skipped {
 		return false
@@ -223,6 +301,7 @@ func (x *Exchange) Finish(e Event) {
 		return
 	}
 	x.finished = true
+	x.routeResolver = nil
 	e.ID = x.event.ID
 	e.Time = x.event.Time
 	e.Method = x.event.Method
@@ -241,6 +320,11 @@ func (x *Exchange) Finish(e Event) {
 	e.Context = x.event.Context
 	if e.RequestHeaders == nil {
 		e.RequestHeaders = x.event.RequestHeaders
+	}
+	if x.suppressed {
+		e.Request.Data, e.Response.Data = nil, nil
+		e.Request.State, e.Response.State = "omitted", "omitted"
+		x.requestSample, x.responseSample = nil, nil
 	}
 	end := time.Now()
 	e.Duration = end.Sub(x.start)

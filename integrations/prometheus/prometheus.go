@@ -1,4 +1,4 @@
-// Package prometheus exports API, profiling, pipeline health and security metrics.
+// Package prometheus exports API, profiling, logger, pipeline and security metrics.
 // Metric labels are limited to explicit allowlists and fixed enumerations.
 package prometheus
 
@@ -13,9 +13,15 @@ import (
 )
 
 type Options struct {
-	Routes, Outputs, SecurityRules                               []string
-	DisableAPI, DisableProfiling, DisableHealth, DisableSecurity bool
-	SlowThreshold                                                time.Duration
+	Routes, Outputs, SecurityRules                []string
+	DisableAPI, DisableProfiling, DisableSecurity bool
+	// DisableLogger omits request-path logger timings and skipped-event metrics.
+	DisableLogger bool
+	// DisablePipeline omits queue, delivery, worker and batch metrics.
+	DisablePipeline bool
+	// DisableHealth is a convenience option that disables both logger and pipeline metrics.
+	DisableHealth bool
+	SlowThreshold time.Duration
 }
 type Observer struct {
 	routes, outputs, rules map[string]bool
@@ -109,18 +115,21 @@ func New(reg prometheus.Registerer, opts Options) (*Observer, error) {
 		o.signals = prometheus.NewCounterVec(prometheus.CounterOpts{Name: "apilog_security_signals_total", Help: "Security hints by allowlisted rule and fixed severity."}, []string{"rule", "severity"})
 		collectors = append(collectors, o.signals)
 	}
-	if !opts.DisableHealth {
+	if !opts.DisableHealth && !opts.DisableLogger {
+		o.timing = prometheus.NewHistogramVec(prometheus.HistogramOpts{Name: "apilog_health_operation_duration_seconds", Help: "Logger work measured on the request path.", Buckets: []float64{0.000001, 0.00001, 0.0001, 0.001, 0.01, 0.1}}, []string{"route", "stage"})
+		o.skipped = prometheus.NewCounterVec(prometheus.CounterOpts{Name: "apilog_health_skipped_total", Help: "Events skipped before queue admission."}, []string{"reason"})
+		collectors = append(collectors, o.timing, o.skipped)
+	}
+	if !opts.DisableHealth && !opts.DisablePipeline {
 		o.queue = prometheus.NewGaugeVec(prometheus.GaugeOpts{Name: "apilog_health_queue_entries", Help: "Current queued events."}, []string{"output"})
 		o.queueBytes = prometheus.NewGaugeVec(prometheus.GaugeOpts{Name: "apilog_health_queue_bytes", Help: "Current queued serialized bytes."}, []string{"output"})
 		o.workers = prometheus.NewGaugeVec(prometheus.GaugeOpts{Name: "apilog_health_worker_running", Help: "Whether the output worker is running."}, []string{"output"})
 		o.pipeline = prometheus.NewCounterVec(prometheus.CounterOpts{Name: "apilog_health_events_total", Help: "Output event lifecycle counters."}, []string{"output", "outcome"})
 		o.writeDuration = prometheus.NewGaugeVec(prometheus.GaugeOpts{Name: "apilog_health_last_write_seconds", Help: "Duration of the latest batch write."}, []string{"output"})
-		o.timing = prometheus.NewHistogramVec(prometheus.HistogramOpts{Name: "apilog_health_operation_duration_seconds", Help: "Logger work measured on the request path.", Buckets: []float64{0.000001, 0.00001, 0.0001, 0.001, 0.01, 0.1}}, []string{"route", "stage"})
-		o.skipped = prometheus.NewCounterVec(prometheus.CounterOpts{Name: "apilog_health_skipped_total", Help: "Events skipped before queue admission."}, []string{"reason"})
 		o.batchSize = prometheus.NewHistogramVec(prometheus.HistogramOpts{Name: "apilog_health_batch_size", Help: "Events in a completed batch write attempt.", Buckets: []float64{1, 5, 10, 25, 50, 100, 250, 1000}}, []string{"output"})
 		o.flushDuration = prometheus.NewHistogramVec(prometheus.HistogramOpts{Name: "apilog_health_flush_duration_seconds", Help: "Duration of a completed batch write attempt.", Buckets: prometheus.DefBuckets}, []string{"output"})
 		o.batches = prometheus.NewCounterVec(prometheus.CounterOpts{Name: "apilog_health_batches_total", Help: "Completed batch write attempts."}, []string{"output"})
-		collectors = append(collectors, o.queue, o.queueBytes, o.workers, o.pipeline, o.writeDuration, o.timing, o.skipped, o.batchSize, o.flushDuration, o.batches)
+		collectors = append(collectors, o.queue, o.queueBytes, o.workers, o.pipeline, o.writeDuration, o.batchSize, o.flushDuration, o.batches)
 	}
 	for i, c := range collectors {
 		if err := reg.Register(c); err != nil {

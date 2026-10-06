@@ -7,7 +7,7 @@ Inspect API requests across Go servers with masked request/response logging, SQL
 
 Inspired by [DRF-API-Logger](https://github.com/vishalanandl177/DRF-API-Logger). The core uses the Go standard library and does not depend on a framework, SQL driver, or telemetry SDK. Supports Go 1.26 and 1.27.
 
-**Development status:** implementation and release validation are in progress. See the [parity matrix](docs/parity.md) and CI results for verified coverage. Stable module installation instructions will be finalized with the first release.
+See the [parity matrix](docs/parity.md), [release notes](CHANGELOG.md), and CI results for the supported features and verification boundaries.
 
 ## What is included
 
@@ -23,6 +23,12 @@ Inspired by [DRF-API-Logger](https://github.com/vishalanandl177/DRF-API-Logger).
 Native Fiber/fasthttp adapters are follow-up work. They are not included in the compatibility claim for this release.
 
 ## Quick start
+
+Install the core in an existing Go module:
+
+```sh
+go get github.com/vishalanandl177/go-api-logger@v1.0.0
+```
 
 The following complete application logs sanitized events as JSON lines. Applications own server lifetime and output resources.
 
@@ -91,6 +97,18 @@ The logger observes request bodies only as your handler reads them. The example 
 | `github.com/vishalanandl177/go-api-logger/examples` | Runnable application and benchmark harness |
 
 Integration dependencies are isolated from the standard-library core. The initial integrations module groups the supported SDKs together; applications import only the adapters they use.
+
+Install optional modules and the operations command independently:
+
+```sh
+go get github.com/vishalanandl177/go-api-logger/storage@v1.0.0
+go get github.com/vishalanandl177/go-api-logger/integrations@v1.0.0
+go install github.com/vishalanandl177/go-api-logger/cmd/apilog@v1.0.0
+```
+
+Add the Go binary directory (`go env GOBIN`, or `$(go env GOPATH)/bin` when GOBIN is empty) to your PATH to invoke `apilog`. The CLI reads database credentials from an environment variable. See the [operations guide](docs/operations.md).
+
+For a complete local application with SQLite, profiling, a protected dashboard and metrics, clone this repository and follow [the runnable example](examples/README.md). Framework-specific applications are in [integrations/examples](integrations/examples).
 
 ## Configuration defaults
 

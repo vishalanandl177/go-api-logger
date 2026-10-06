@@ -6,3 +6,9 @@
 *.yml text eol=lf
 *.sh text eol=lf
 *.ps1 text eol=lf
+*.html text eol=lf
+*.css text eol=lf
+*.js text eol=lf
+*.json text eol=lf
+LICENSE text eol=lf
+NOTICE text eol=lf

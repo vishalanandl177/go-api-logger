@@ -2,20 +2,21 @@
 package chi
 
 import (
+	"net/http"
+
 	"github.com/go-chi/chi/v5"
 	apilog "github.com/vishalanandl177/go-api-logger"
-	"net/http"
 )
 
-// Metadata reads the final route pattern after routing has completed.
+// Metadata supplies the current route pattern before body capture and snapshots
+// it after routing completes. Install with Router.Use, inside outer HTTP capture.
 func Metadata(group string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			defer func() {
-				if route := chi.RouteContext(r.Context()); route != nil {
-					apilog.SetRoute(r.Context(), route.RoutePattern(), "", group)
-				}
-			}()
+			route := chi.RouteContext(r.Context())
+			defer apilog.SetRouteResolver(r.Context(), func() (string, string, string) {
+				return route.RoutePattern(), "", group
+			})()
 			next.ServeHTTP(w, r)
 		})
 	}
